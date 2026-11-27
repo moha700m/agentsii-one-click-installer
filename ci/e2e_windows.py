@@ -39,7 +39,13 @@ def run_exe(exe: Path, args: list[str], env: dict, json_out: Path, timeout=600) 
     if json_out.exists():
         json_out.unlink()
     p = subprocess.run([str(exe), *args, "--json-out", str(json_out)], env=env, timeout=timeout)
-    data = json.loads(json_out.read_text(encoding="utf-8")) if json_out.exists() else {}
+    data: dict = {}
+    if json_out.exists():
+        raw = json_out.read_text(encoding="utf-8")
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = {"raw": raw.strip()}
     return p.returncode, data
 
 
@@ -173,7 +179,7 @@ def main() -> int:
             check("installer installs app", sp.returncode == 0 and installed.exists(), installed)
             if installed.exists():
                 rc, data = run_exe(installed, ["--version"], env, OUT / "installed-version.json")
-                check("installed app runs", rc == 0, rc)
+                check("installed app runs", rc == 0 and data.get("raw") == "1.0.0", data)
             unins = Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Agentsii" / "unins000.exe"
             if unins.exists():
                 up = subprocess.run([str(unins), "/VERYSILENT", "/SUPPRESSMSGBOXES"], timeout=300)
