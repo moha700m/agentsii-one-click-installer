@@ -1,7 +1,7 @@
 ; Agentsii One-Click API Installer - Windows setup (Inno Setup 6)
 #define AppName "Agentsii One-Click API Installer"
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 
 [Setup]

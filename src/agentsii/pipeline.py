@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+
+import tomlkit
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -42,6 +44,7 @@ class Result:
     bridged: bool = False
     codex_base_url: str = ""
     picker: str = ""
+    picker_check: str = ""
     service_running: bool = False
     autostart: bool = False
     backup_path: str = ""
@@ -224,7 +227,7 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
         catalog_file = None
         try:
             owner = catalog.config_catalog_owner(codex.load_config(inst.config_path))
-            bundled = catalog.bundled_catalog(inst.cli_path) if owner != "user" else None
+            bundled = catalog.bundled_catalog(inst.catalog_cli) if owner != "user" else None
             if owner == "user":
                 res.picker = "user_catalog"
             elif bundled is None:
@@ -250,6 +253,17 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
                 models=res.added, default_model=res.default_model, catalog_file=catalog_file)
         except Exception as e:  # noqa: BLE001
             raise StageFailure("config_write_failed", str(e)[:200]) from e
+        if catalog_file is not None:
+            # Let the Codex binary that Desktop actually runs load config + catalog.
+            status, detail = catalog.validate(inst.catalog_cli, inst.home, res.added)
+            res.picker_check = status
+            log.info("catalog validation: %s %s", status, detail)
+            if status == "invalid":
+                doc = codex.load_config(inst.config_path)
+                doc.pop("model_catalog_json", None)
+                codex._atomic_write(inst.config_path, tomlkit.dumps(doc))
+                catalog_file.unlink(missing_ok=True)
+                res.picker = "rejected"
         cb.stage_done(5, res.provider_id)
 
         # [7] credentials ------------------------------------------------

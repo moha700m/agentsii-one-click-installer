@@ -65,6 +65,7 @@ def main(argv=None) -> int:
     ap.add_argument("--tray", action="store_true", help="background service (bridge + model sync)")
     ap.add_argument("--bridge", action="store_true", help="bridge only, no UI")
     ap.add_argument("--uninstall-cleanup", action="store_true")
+    ap.add_argument("--repair-codex", action="store_true")
     ap.add_argument("--version", action="store_true")
     args = ap.parse_args(argv)
 
@@ -76,6 +77,11 @@ def main(argv=None) -> int:
     if args.uninstall_cleanup:
         from .cleanup import run as cleanup_run
         return cleanup_run()
+
+    if args.repair_codex:
+        from . import repair
+        _emit(json.dumps(repair.run(), ensure_ascii=False), args.json_out)
+        return 0
 
     if args.tray:
         from .tray import run_tray

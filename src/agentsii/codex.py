@@ -67,6 +67,11 @@ class CodexInstall:
     cli_version_text: str = ""
     desktop_path: str | None = None
     desktop_appid: str | None = None
+    desktop_cli: str | None = None  # codex.exe shipped inside Codex Desktop (what Desktop runs)
+
+    @property
+    def catalog_cli(self) -> str | None:
+        return self.desktop_cli or self.cli_path
 
     @property
     def found(self) -> bool:
@@ -130,30 +135,33 @@ def _cli_version(cli: str) -> tuple[tuple[int, int, int] | None, str]:
         return None, ""
 
 
-def _find_desktop() -> tuple[str | None, str | None]:
+def _find_desktop() -> tuple[str | None, str | None, str | None]:
     if sys.platform != "win32":
-        return None, None
+        return None, None, None
     local = os.environ.get("LOCALAPPDATA", "")
     for c in (Path(local) / "Programs" / "Codex" / "Codex.exe",
               Path(local) / "Programs" / "codex-desktop" / "Codex.exe",
               Path(local) / "OpenAI" / "Codex" / "Codex.exe"):
         if c.exists():
-            return str(c), None
+            return str(c), None, None
     try:
         ps = ("$p = Get-AppxPackage -Name '*OpenAI.Codex*' -ErrorAction SilentlyContinue | Select-Object -First 1; "
-              "if ($p) { $exe = Join-Path $p.InstallLocation 'app\\Codex.exe'; if (Test-Path $exe) { 'PATH:' + $exe } }; "
+              "if ($p) { $exe = Join-Path $p.InstallLocation 'app\\Codex.exe'; if (Test-Path $exe) { 'PATH:' + $exe }; "
+              "$cli = Get-ChildItem -Path (Join-Path $p.InstallLocation 'app\\resources') -Recurse -Filter codex.exe "
+              "-ErrorAction SilentlyContinue | Select-Object -First 1; if ($cli) { 'CLI:' + $cli.FullName } }; "
               "Get-StartApps | Where-Object { $_.Name -like 'Codex*' } | "
               "Select-Object -First 1 -ExpandProperty AppID")
         out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                              capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW)
         lines = [l.strip() for l in (out.stdout or "").splitlines() if l.strip()]
         path = next((l[5:] for l in lines if l.startswith("PATH:")), None)
-        appid = next((l for l in lines if not l.startswith("PATH:")), None)
-        if path or appid:
-            return path, appid
+        cli = next((l[4:] for l in lines if l.startswith("CLI:")), None)
+        appid = next((l for l in lines if not l.startswith(("PATH:", "CLI:"))), None)
+        if path or appid or cli:
+            return path, appid, cli
     except (OSError, subprocess.SubprocessError):
         pass
-    return None, None
+    return None, None, None
 
 
 def detect() -> CodexInstall:
@@ -162,9 +170,10 @@ def detect() -> CodexInstall:
     inst.cli_path = _find_cli()
     if inst.cli_path:
         inst.cli_version, inst.cli_version_text = _cli_version(inst.cli_path)
-    inst.desktop_path, inst.desktop_appid = _find_desktop()
-    log.info("Codex detect: home=%s exists=%s cli=%s ver=%s desktop=%s appid=%s",
-             home, inst.home_exists, inst.cli_path, inst.cli_version_text, inst.desktop_path, inst.desktop_appid)
+    inst.desktop_path, inst.desktop_appid, inst.desktop_cli = _find_desktop()
+    log.info("Codex detect: home=%s exists=%s cli=%s ver=%s desktop=%s appid=%s desktop_cli=%s",
+             home, inst.home_exists, inst.cli_path, inst.cli_version_text, inst.desktop_path,
+             inst.desktop_appid, inst.desktop_cli)
     return inst
 
 
@@ -409,16 +418,16 @@ def open_codex(inst: CodexInstall, workspace: Path | None = None) -> bool:
     from .catalog import cli_command
     ws = str(workspace or Path.home())
     try:
-        if inst.cli_path and (inst.desktop_path or inst.desktop_appid):
-            subprocess.Popen(cli_command(inst.cli_path) + ["app", ws], cwd=ws, close_fds=True,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=_NO_WINDOW)
+        if inst.desktop_appid and sys.platform == "win32":
+            os.startfile(f"shell:AppsFolder\\{inst.desktop_appid}")  # type: ignore[attr-defined]
             return True
         if inst.desktop_path:
             subprocess.Popen([inst.desktop_path], close_fds=True)
             return True
-        if inst.desktop_appid and sys.platform == "win32":
-            os.startfile(f"shell:AppsFolder\\{inst.desktop_appid}")  # type: ignore[attr-defined]
+        if inst.cli_path and inst.desktop_cli:
+            subprocess.Popen(cli_command(inst.cli_path) + ["app", ws], cwd=ws, close_fds=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=_NO_WINDOW)
             return True
         if inst.cli_path and sys.platform == "win32":
             subprocess.Popen(["cmd.exe", "/c", "start", "Codex", "cmd.exe", "/k", inst.cli_path],

@@ -65,41 +65,45 @@ def display_name(provider_name: str, model: str) -> str:
     return spaced if model.lower().startswith(provider_name.lower()) else f"{provider_name} · {model}"
 
 
-def catalog_entry(provider_name: str, model: str, base_instructions: str, priority: int,
+def _template(models: list) -> dict | None:
+    for m in models:
+        if isinstance(m, dict) and m.get("visibility") == "list" and m.get("supported_in_api") and m.get("slug"):
+            return m
+    return next((m for m in models if isinstance(m, dict) and m.get("slug")), None)
+
+
+def catalog_entry(provider_name: str, model: str, template: dict | None, priority: int,
                   context_window: int | None) -> dict:
-    ctx = int(context_window or DEFAULT_CONTEXT)
-    ctx = max(4096, min(ctx, 100_000_000))
-    lvl = lambda e, d: {"effort": e, "description": d}  # noqa: E731
-    return {
-        "slug": model,
-        "display_name": display_name(provider_name, model),
-        "description": f"{provider_name} model added by Agentsii.",
-        "default_reasoning_level": "medium",
-        "supported_reasoning_levels": [lvl("low", "Faster responses"), lvl("medium", "Balanced"),
-                                       lvl("high", "Deeper reasoning")],
-        "shell_type": "shell_command",
-        "visibility": "list",
-        "supported_in_api": True,
-        "priority": priority,
-        "additional_speed_tiers": [],
-        "service_tiers": [],
-        "base_instructions": base_instructions,
-        "supports_reasoning_summaries": False,
-        "default_reasoning_summary": "none",
-        "support_verbosity": False,
-        "default_verbosity": "low",
-        "apply_patch_tool_type": "freeform",
-        "web_search_tool_type": "text",
-        "truncation_policy": {"mode": "tokens", "limit": 10_000},
-        "supports_parallel_tool_calls": True,
-        "supports_image_detail_original": False,
-        "context_window": ctx,
-        "max_context_window": ctx,
-        "effective_context_window_percent": 95,
-        "experimental_supported_tools": [],
-        "input_modalities": ["text"],
-        "supports_search_tool": False,
+    """A provider model entry built from one of Codex's OWN bundled entries, so the
+    field set always matches the Codex version that will read it. Only values are
+    changed: no reasoning levels, no speed tiers, text input, its own context."""
+    ctx = max(4096, min(int(context_window or DEFAULT_CONTEXT), 4_000_000))
+    if template is None:
+        e = {"base_instructions": "You are a coding assistant. Use the provided tools to inspect and change files.",
+             "shell_type": "unified_exec", "supports_reasoning_summary_parameter": False,
+             "default_reasoning_summary": "none", "support_verbosity": False, "default_verbosity": None,
+             "apply_patch_tool_type": None, "truncation_policy": {"mode": "tokens", "limit": 10000},
+             "effective_context_window_percent": 90, "experimental_supported_tools": [],
+             "additional_speed_tiers": [], "service_tiers": [], "default_service_tier": None,
+             "availability_nux": None, "upgrade": None, "context_window": ctx,
+             "input_modalities": ["text"], "default_reasoning_level": None, "supported_reasoning_levels": []}
+    else:
+        e = json.loads(json.dumps(template))
+    e.update(slug=model, display_name=display_name(provider_name, model),
+             description=f"{provider_name} model added by Agentsii.", visibility="list", supported_in_api=True)
+    overrides = {
+        "priority": priority, "upgrade": None, "availability_nux": None,
+        "default_reasoning_level": None, "supported_reasoning_levels": [],
+        "context_window": ctx, "max_context_window": ctx, "input_modalities": ["text"],
+        "service_tiers": [], "additional_speed_tiers": [], "default_service_tier": None,
+        "supports_reasoning_summaries": False, "supports_reasoning_summary_parameter": False,
+        "default_reasoning_summary": "none", "support_verbosity": False, "default_verbosity": None,
+        "experimental_supported_tools": [], "supports_search_tool": False,
     }
+    for k, v in overrides.items():
+        if k in e:
+            e[k] = v
+    return e
 
 
 def build_catalog(bundled: dict, providers: dict) -> tuple[dict, int]:
@@ -107,8 +111,8 @@ def build_catalog(bundled: dict, providers: dict) -> tuple[dict, int]:
     catalog = json.loads(json.dumps(bundled))
     models = catalog["models"]
     slugs = {m.get("slug") for m in models if isinstance(m, dict)}
-    base = next((m.get("base_instructions") for m in models if isinstance(m, dict) and m.get("base_instructions")), "")
-    priority = 10_000
+    template = _template(models)
+    priority = max([m.get("priority", 0) for m in models if isinstance(m, dict) and isinstance(m.get("priority"), int)] or [0]) + 100
     added = 0
     for pid in sorted(providers):
         p = providers[pid]
@@ -116,11 +120,37 @@ def build_catalog(bundled: dict, providers: dict) -> tuple[dict, int]:
             if model in slugs:
                 continue
             slugs.add(model)
-            models.append(catalog_entry(p.get("name") or pid, model, base, priority,
+            models.append(catalog_entry(p.get("name") or pid, model, template, priority,
                                         (p.get("context") or {}).get(model)))
             priority += 1
             added += 1
     return catalog, added
+
+
+def validate(cli: str | None, home: Path, expect: list[str]) -> tuple[str, str]:
+    """Ask Codex itself to load config.toml + the catalog.
+    Returns ("ok"|"invalid"|"unknown", detail)."""
+    if not cli:
+        return "unknown", "no codex binary"
+    try:
+        env = dict(os.environ, CODEX_HOME=str(home))
+        out = subprocess.run(cli_command(cli) + ["debug", "models"], capture_output=True, timeout=45,
+                             stdin=subprocess.DEVNULL, env=env, cwd=str(home), creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError) as e:
+        return "unknown", str(e)[:200]
+    text = out.stdout.decode("utf-8", "replace")
+    err = out.stderr.decode("utf-8", "replace")
+    if out.returncode == 0:
+        try:
+            slugs = {m.get("slug") for m in json.loads(text).get("models", []) if isinstance(m, dict)}
+        except ValueError:
+            return "unknown", "unparsable output"
+        missing = [m for m in expect if m not in slugs]
+        return ("ok", "") if not missing else ("invalid", f"models missing from Codex catalog: {missing[:5]}")
+    low = err.lower()
+    if any(k in low for k in ("catalog", "config", "toml", "parse", "invalid", "deserializ", "unknown field", "missing field")):
+        return "invalid", err.strip()[-400:]
+    return "unknown", err.strip()[-300:]
 
 
 def catalog_path(home: Path) -> Path:

@@ -94,6 +94,18 @@ def run_tray() -> int:
         a_codex = QAction("Open Codex / فتح Codex")
         a_codex.triggered.connect(lambda: codex.open_codex(codex.detect()))
         menu.addAction(a_codex)
+        def do_repair():
+            from . import repair
+            from PySide6.QtWidgets import QMessageBox
+            if system.running_codex_desktop():
+                QMessageBox.information(None, "Agentsii", "Quit Codex completely first, then choose Repair again.\n"
+                                        "أغلق Codex بالكامل أولاً ثم اختر الإصلاح مرة أخرى.")
+                return
+            r = repair.run()
+            QMessageBox.information(None, "Agentsii", f"Codex repaired / تم الإصلاح\n{r}")
+        a_repair = QAction("Repair Codex / إصلاح Codex")
+        a_repair.triggered.connect(do_repair)
+        menu.addAction(a_repair)
         a_auto = QAction("Start with Windows / التشغيل مع Windows")
         a_auto.setCheckable(True)
         a_auto.setChecked(system.autostart_enabled())
@@ -109,6 +121,6 @@ def run_tray() -> int:
         menu.addAction(a_quit)
         tray.setContextMenu(menu)
         tray.show()
-        app._agentsii_keep = (tray, menu, status, a_open, a_codex, a_auto, a_quit)  # type: ignore[attr-defined]
+        app._agentsii_keep = (tray, menu, status, a_open, a_codex, a_repair, a_auto, a_quit)  # type: ignore[attr-defined]
     app.setApplicationName(APP_NAME)
     return app.exec()

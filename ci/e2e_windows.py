@@ -106,6 +106,9 @@ def main() -> int:
         check("Codex model picker catalog = built-in models + provider models",
               {"agent-codex-1", "agent-pro-2"} <= set(cat_slugs) and len(builtin) >= 3, (cat_path, cat_slugs[:8]))
         check("background service running", data.get("service_running") is True, data.get("service_running"))
+        print("catalog validation by Codex:", data.get("picker_check"), flush=True)
+        check("Codex itself accepted config + catalog", data.get("picker_check") == "ok" and data.get("picker") == "updated",
+              (data.get("picker"), data.get("picker_check")))
         check("profile files created", len(profiles) == 2 or "profiles" in cfg, profiles)
 
         ck = subprocess.run(["cmdkey", "/list"], capture_output=True, text=True)
@@ -177,6 +180,12 @@ def main() -> int:
         check("wrong key rejected, config untouched",
               rc == 1 and data.get("error_code") == "key_invalid"
               and (codex_home / "config.toml").read_bytes() == before, data.get("error_code"))
+
+        # ---------------------------------------------------------------- repair
+        (codex_home / ".codex-global-state.json").write_text("{damaged", encoding="utf-8")
+        rc, data = run_exe(portable, ["--repair-codex"], env, OUT / "repair.json")
+        check("Repair Codex renames damaged state, keeps config valid",
+              rc == 0 and not (codex_home / ".codex-global-state.json").exists() and data.get("config") == "ok", data)
 
         # ---------------------------------------------------------------- onedir app
         onedir = DIST / "AgentsiiInstaller" / "AgentsiiInstaller.exe"
@@ -267,7 +276,7 @@ def main() -> int:
             check("installer installs app", sp.returncode == 0 and installed.exists(), installed)
             if installed.exists():
                 rc, data = run_exe(installed, ["--version"], env, OUT / "installed-version.json")
-                check("installed app runs", rc == 0 and data.get("raw") == "1.0.0", data)
+                check("installed app runs", rc == 0 and data.get("raw") == "1.1.0", data)
             unins = Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Agentsii" / "unins000.exe"
             if unins.exists():
                 up = subprocess.run([str(unins), "/VERYSILENT", "/SUPPRESSMSGBOXES"], timeout=300, env=env)

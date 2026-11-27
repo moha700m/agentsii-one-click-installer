@@ -132,11 +132,3 @@ def running_codex_desktop() -> list[int]:
         return [int(x) for x in out.stdout.split() if x.strip().isdigit()]
     except (OSError, subprocess.SubprocessError):
         return []
-
-
-def close_codex_desktop(pids: list[int]) -> None:
-    for pid in pids:
-        subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True, creationflags=_NO_WINDOW)
-    time.sleep(2.5)
-    for pid in pids:
-        subprocess.run(["taskkill", "/F", "/PID", str(pid), "/T"], capture_output=True, creationflags=_NO_WINDOW)

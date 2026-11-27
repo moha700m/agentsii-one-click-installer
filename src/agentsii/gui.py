@@ -302,6 +302,9 @@ class MainWindow(QMainWindow):
         self.l_privacy.setWordWrap(True)
         self.l_privacy.setAlignment(Qt.AlignCenter)
         c.addWidget(self.l_privacy)
+        self.btn_repair_form = QPushButton(objectName="Link", cursor=Qt.PointingHandCursor)
+        self.btn_repair_form.clicked.connect(self.repair_codex)
+        c.addWidget(self.btn_repair_form, 0, Qt.AlignCenter)
         v.addWidget(card)
         v.addStretch(1)
         return page
@@ -360,9 +363,12 @@ class MainWindow(QMainWindow):
         self.btn_models.clicked.connect(self.show_models)
         self.btn_log = QPushButton(objectName="Link", cursor=Qt.PointingHandCursor)
         self.btn_log.clicked.connect(self.open_log)
+        self.btn_repair = QPushButton(objectName="Link", cursor=Qt.PointingHandCursor)
+        self.btn_repair.clicked.connect(self.repair_codex)
         links.addStretch(1)
         links.addWidget(self.btn_models)
         links.addWidget(self.btn_log)
+        links.addWidget(self.btn_repair)
         links.addStretch(1)
         rc.addLayout(links)
         self.res_card.hide()
@@ -404,6 +410,9 @@ class MainWindow(QMainWindow):
                 r.set_state("failed", t(f"err_{r.raw[1]}"))
         self.btn_models.setText(t("show_models"))
         self.btn_log.setText(t("open_log"))
+        self.btn_repair.setText(t("repair"))
+        if hasattr(self, "btn_repair_form"):
+            self.btn_repair_form.setText(t("repair"))
         if self.result is not None:
             self._render_result()
 
@@ -539,13 +548,15 @@ class MainWindow(QMainWindow):
         if self.result and self.result.ok:
             inst = self.result.codex or codex.detect()
             from . import system
-            running = system.running_codex_desktop()
-            if running:
-                t = self.tr_
-                ans = QMessageBox.question(self, t("restart_title"), t("restart_body"),
-                                           QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                if ans == QMessageBox.Yes:
-                    system.close_codex_desktop(running)
+            t = self.tr_
+            # Never kill Codex: a forced kill can damage its state file.
+            if system.running_codex_desktop():
+                if QMessageBox.information(self, t("restart_title"), t("codex_close_first"),
+                                           QMessageBox.Ok | QMessageBox.Cancel) != QMessageBox.Ok:
+                    return
+                if system.running_codex_desktop():
+                    QMessageBox.information(self, APP_NAME, t("codex_still_open"))
+                    return
             if not codex.open_codex(inst):
                 QMessageBox.information(self, APP_NAME, self.tr_("codex_open_failed"))
         else:
@@ -584,6 +595,21 @@ class MainWindow(QMainWindow):
         te.setPlainText("\n".join(lines))
         lay.addWidget(te)
         dlg.exec()
+
+    def repair_codex(self):
+        from . import repair, system
+        t = self.tr_
+        if system.running_codex_desktop():
+            if QMessageBox.information(self, t("repair"), t("repair_close"),
+                                       QMessageBox.Ok | QMessageBox.Cancel) != QMessageBox.Ok:
+                return
+            if system.running_codex_desktop():
+                QMessageBox.warning(self, t("repair"), t("repair_still_running"))
+                return
+        r = repair.run()
+        details = "\n".join([f"state: {', '.join(r['renamed']) or '-'}", f"catalog: {r['catalog']}",
+                              f"config: {r['config']}"])
+        QMessageBox.information(self, t("repair"), t("repair_done", details=details))
 
     def open_log(self):
         p = log_file()
