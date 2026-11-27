@@ -76,16 +76,20 @@ def _port_free(port: int) -> bool:
 
 
 def is_bridge_running(port: int, timeout: float = 1.5) -> bool:
+    """True only for an Agentsii bridge serving THIS user's registry."""
     if not port:
         return False
     try:
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
         c.request("GET", HEALTH_PATH)
         r = c.getresponse()
-        ok = r.status == 200 and b"agentsii" in r.read()
+        body = r.read()
         c.close()
-        return ok
-    except OSError:
+        if r.status != 200 or b"agentsii" not in body:
+            return False
+        reg = json.loads(body).get("registry")
+        return reg is None or os.path.normcase(reg) == os.path.normcase(str(registry_path()))
+    except (OSError, ValueError):
         return False
 
 
@@ -488,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         upstream, rest = self._route()
         if rest == "health":
-            return self._json(200, {"agentsii": True, "pid": os.getpid()})
+            return self._json(200, {"agentsii": True, "pid": os.getpid(), "registry": str(registry_path())})
         if upstream is None:
             return self._json(404, {"error": {"message": f"agentsii bridge: {rest}"}})
         if rest != "/models":

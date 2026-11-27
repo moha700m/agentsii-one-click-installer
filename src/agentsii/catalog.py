@@ -24,6 +24,11 @@ from .logutil import log
 
 CATALOG_FILE = "agentsii-model-catalog.json"
 DEFAULT_CONTEXT = 128_000
+DEFAULT_INSTRUCTIONS = (
+    "You are Codex, a coding agent running in the user's workspace. Work autonomously until the task is done. "
+    "Use the provided tools to read files, run commands and apply patches; prefer small, verifiable steps. "
+    "Follow repository conventions and any AGENTS.md instructions. Do not invent results: run checks when you can "
+    "and report clearly what you changed, what you verified and what you could not verify.")
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -72,38 +77,44 @@ def _template(models: list) -> dict | None:
     return next((m for m in models if isinstance(m, dict) and m.get("slug")), None)
 
 
+# Fields for a third-party model. Model-family features of OpenAI's own models
+# (code-only tool mode, multi-agent, responses-lite, speed tiers, reasoning...)
+# are deliberately NOT copied: Codex then uses its standard tools and defaults.
+_SAFE_FIELDS = ("slug", "display_name", "description", "default_reasoning_level", "supported_reasoning_levels",
+                "shell_type", "visibility", "supported_in_api", "priority", "additional_speed_tiers",
+                "service_tiers", "default_service_tier", "availability_nux", "upgrade", "base_instructions",
+                "supports_reasoning_summary_parameter", "supports_reasoning_summaries", "default_reasoning_summary",
+                "support_verbosity", "default_verbosity", "apply_patch_tool_type", "truncation_policy",
+                "supports_parallel_tool_calls", "context_window", "effective_context_window_percent",
+                "experimental_supported_tools", "input_modalities")
+_REQUIRED = {"slug", "display_name", "visibility", "supported_in_api", "priority", "base_instructions",
+             "supported_reasoning_levels", "shell_type", "truncation_policy", "context_window",
+             "experimental_supported_tools", "input_modalities"}
+
+
 def catalog_entry(provider_name: str, model: str, template: dict | None, priority: int,
                   context_window: int | None) -> dict:
-    """A provider model entry built from one of Codex's OWN bundled entries, so the
-    field set always matches the Codex version that will read it. Only values are
-    changed: no reasoning levels, no speed tiers, text input, its own context."""
+    """Minimal entry for a provider model (same field set the Codex catalogs use,
+    limited to fields this Codex version knows)."""
     ctx = max(4096, min(int(context_window or DEFAULT_CONTEXT), 4_000_000))
-    if template is None:
-        e = {"base_instructions": "You are a coding assistant. Use the provided tools to inspect and change files.",
-             "shell_type": "unified_exec", "supports_reasoning_summary_parameter": False,
-             "default_reasoning_summary": "none", "support_verbosity": False, "default_verbosity": None,
-             "apply_patch_tool_type": None, "truncation_policy": {"mode": "tokens", "limit": 10000},
-             "effective_context_window_percent": 90, "experimental_supported_tools": [],
-             "additional_speed_tiers": [], "service_tiers": [], "default_service_tier": None,
-             "availability_nux": None, "upgrade": None, "context_window": ctx,
-             "input_modalities": ["text"], "default_reasoning_level": None, "supported_reasoning_levels": []}
-    else:
-        e = json.loads(json.dumps(template))
-    e.update(slug=model, display_name=display_name(provider_name, model),
-             description=f"{provider_name} model added by Agentsii.", visibility="list", supported_in_api=True)
-    overrides = {
-        "priority": priority, "upgrade": None, "availability_nux": None,
+    full = {
+        "slug": model, "display_name": display_name(provider_name, model),
+        "description": f"{provider_name} model added by Agentsii.",
         "default_reasoning_level": None, "supported_reasoning_levels": [],
-        "context_window": ctx, "max_context_window": ctx, "input_modalities": ["text"],
-        "service_tiers": [], "additional_speed_tiers": [], "default_service_tier": None,
-        "supports_reasoning_summaries": False, "supports_reasoning_summary_parameter": False,
+        "shell_type": "shell_command", "visibility": "list", "supported_in_api": True, "priority": priority,
+        "additional_speed_tiers": [], "service_tiers": [], "default_service_tier": None,
+        "availability_nux": None, "upgrade": None,
+        "base_instructions": DEFAULT_INSTRUCTIONS,
+        "supports_reasoning_summary_parameter": False, "supports_reasoning_summaries": False,
         "default_reasoning_summary": "none", "support_verbosity": False, "default_verbosity": None,
-        "experimental_supported_tools": [], "supports_search_tool": False,
+        "apply_patch_tool_type": "freeform", "truncation_policy": {"mode": "tokens", "limit": 10_000},
+        "supports_parallel_tool_calls": False, "context_window": ctx, "effective_context_window_percent": 90,
+        "experimental_supported_tools": [], "input_modalities": ["text"],
     }
-    for k, v in overrides.items():
-        if k in e:
-            e[k] = v
-    return e
+    if template:
+        known = set(template)
+        full = {k: v for k, v in full.items() if k in known or k in _REQUIRED}
+    return full
 
 
 def build_catalog(bundled: dict, providers: dict) -> tuple[dict, int]:

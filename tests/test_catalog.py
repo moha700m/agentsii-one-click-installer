@@ -49,7 +49,7 @@ def test_catalog_published_and_synced(isolated, fake_cli):
     slugs = [m["slug"] for m in cat["models"]]
     assert slugs[0] == "gpt-5.5" and {"agent-codex-1", "agent-pro-2"} <= set(slugs)
     entry = next(m for m in cat["models"] if m["slug"] == "agent-pro-2")
-    assert entry["base_instructions"] == "BASE" and entry["display_name"].startswith("My Gateway")
+    assert entry["base_instructions"] == catalog.DEFAULT_INSTRUCTIONS and entry["display_name"].startswith("My Gateway")
     assert cfg["mcp_servers"]["x"]["command"] == "y"
 
     providers = bridge.load_registry()["providers"]
@@ -94,15 +94,19 @@ def test_catalog_rejected_by_codex_is_detached(isolated, tmp_path):
     assert not catalog.catalog_path(isolated).exists()
 
 
-def test_catalog_entry_uses_codex_template():
+def test_catalog_entry_never_copies_openai_model_features():
     tpl = {"slug": "gpt-x", "visibility": "list", "supported_in_api": True, "base_instructions": "B",
            "default_reasoning_level": "medium", "supported_reasoning_levels": [{"effort": "low"}],
-           "context_window": 272000, "weird_new_field": {"keep": 1}, "priority": 3}
+           "context_window": 272000, "tool_mode": "code_mode_only", "use_responses_lite": True,
+           "priority": 3, "shell_type": "unified_exec", "truncation_policy": {}, "input_modalities": ["text"],
+           "experimental_supported_tools": ["x"]}
     cat, n = catalog.build_catalog({"models": [tpl]}, {"p": {"name": "P", "models": ["m1"], "context": {"m1": 64000}}})
     e = cat["models"][1]
-    assert n == 1 and e["slug"] == "m1" and e["weird_new_field"] == {"keep": 1}
+    assert n == 1 and e["slug"] == "m1"
+    assert "tool_mode" not in e and "use_responses_lite" not in e
     assert e["default_reasoning_level"] is None and e["supported_reasoning_levels"] == []
-    assert e["context_window"] == 64000 and e["priority"] > 3 and "max_context_window" not in e
+    assert e["context_window"] == 64000 and e["priority"] > 3 and e["experimental_supported_tools"] == []
+    assert "support_verbosity" not in e  # not known to this (template) version
 
 
 def test_repair_renames_state_and_keeps_auth(isolated, monkeypatch):

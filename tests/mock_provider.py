@@ -67,6 +67,8 @@ def make_handler(key: str, responses_enabled: bool, record: list, models_path: s
             record.append({"method": "POST", "path": path, "model": body.get("model"),
                            "auth_ok": self._auth_ok(), "stream": body.get("stream"),
                            "has_tools": bool(body.get("tools")),
+                           "instr_len": len(str(body.get("instructions") or (body.get("messages") or [{}])[0].get("content") or "")),
+                           "reasoning": body.get("reasoning"),
                            "tool_names": [((t.get("function") or {}).get("name") or t.get("name")) for t in body.get("tools") or []][:40],
                            "tool_result_ok": any("AGENTSII_TOOL_OK" in str(m.get("content")) for m in tool_msgs)})
             if not self._auth_ok():
