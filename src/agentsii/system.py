@@ -26,7 +26,8 @@ def service_command() -> list[str]:
     override = os.environ.get("AGENTSII_SERVICE_CMD")
     if override:
         import shlex
-        return shlex.split(override, posix=(sys.platform != "win32"))
+        parts = shlex.split(override, posix=(sys.platform != "win32"))
+        return [x[1:-1] if len(x) >= 2 and x[0] == x[-1] == '"' else x for x in parts]
     return app_command() + ["--tray"]
 
 
@@ -56,7 +57,11 @@ def ensure_service(wait: float = 25.0) -> bool:
         port, _ = bridge.ensure_port()
     if bridge.is_bridge_running(port):
         return True
-    launch_detached(service_command())
+    try:
+        launch_detached(service_command())
+    except OSError as e:
+        log.error("could not start background service: %s", e)
+        return False
     deadline = time.time() + wait
     while time.time() < deadline:
         if bridge.is_bridge_running(port, timeout=0.5):
