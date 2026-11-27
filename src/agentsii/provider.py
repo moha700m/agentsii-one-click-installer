@@ -59,6 +59,7 @@ class ProbeReport:
     models_url: str = ""
     key_verified: bool = False
     discovered: list[str] = field(default_factory=list)
+    context: dict = field(default_factory=dict)
     candidates: list[str] = field(default_factory=list)
     supports_responses: bool = False
     supports_chat: bool = False
@@ -171,6 +172,7 @@ class ProviderClient:
                 report.key_verified = True
                 ids = self._paginate(url, r, ids)
                 report.discovered = ids
+                report.context = _context_windows(r)
                 if not ids:
                     raise ProviderError("no_models")
                 return
@@ -395,6 +397,22 @@ def _parse_models(r: httpx.Response) -> list[str] | None:
         if isinstance(mid, str) and mid.strip() and mid not in ids:
             ids.append(mid.strip())
     return ids
+
+
+def _context_windows(r: httpx.Response) -> dict:
+    data = _safe_json(r)
+    items = data.get("data") or data.get("models") if isinstance(data, dict) else data
+    out = {}
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        mid = it.get("id") or it.get("slug") or it.get("name")
+        for k in ("context_length", "context_window", "max_context_length", "max_model_len", "max_input_tokens"):
+            v = it.get(k) or (it.get("top_provider") or {}).get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                out[str(mid)] = int(v)
+                break
+    return out
 
 
 def _metadata_says_incompatible(it: dict) -> bool:

@@ -92,6 +92,14 @@ def main() -> int:
         backups = list((codex_home / "agentsii-backups").glob("*.bak"))
         check("backup created and identical", backups and backups[0].read_text(encoding="utf-8") == original)
         profiles = sorted(p.name for p in codex_home.glob("agentsii-*.config.toml"))
+        cat_path = cfg.get("model_catalog_json")
+        cat_slugs = []
+        if cat_path and Path(cat_path).exists():
+            cat_slugs = [m.get("slug") for m in json.loads(Path(cat_path).read_text(encoding="utf-8")).get("models", [])]
+        builtin = [x for x in cat_slugs if x not in ("agent-codex-1", "agent-pro-2")]
+        check("Codex model picker catalog = built-in models + provider models",
+              {"agent-codex-1", "agent-pro-2"} <= set(cat_slugs) and len(builtin) >= 3, (cat_path, cat_slugs[:8]))
+        check("background service running", data.get("service_running") is True, data.get("service_running"))
         check("profile files created", len(profiles) == 2 or "profiles" in cfg, profiles)
 
         ck = subprocess.run(["cmdkey", "/list"], capture_output=True, text=True)
@@ -129,6 +137,8 @@ def main() -> int:
             check("Codex used default model", any(r.get("model") == "agent-codex-1" for r in codex_posts))
             check("Codex exec printed provider reply", "AGENTSII_E2E_OK" in (cx.stdout + cx.stderr),
                   (cx.stdout + cx.stderr)[-800:])
+            check("Codex found model metadata in Agentsii catalog", "Model metadata for" not in cx.stderr,
+                  [l for l in cx.stderr.splitlines() if "metadata" in l.lower()])
 
             if profiles:
                 prof = profiles[0].removesuffix(".config.toml")
@@ -215,6 +225,23 @@ def main() -> int:
                       any(r.get("tool_result_ok") for r in reqs), [r.get("tool_names") for r in codex_reqs[:1]])
                 check("Codex printed reply via bridge", "AGENTSII_E2E_OK" in (cx3.stdout + cx3.stderr),
                       (cx3.stdout + cx3.stderr)[-800:])
+            # model picker sync by the background service
+            cfgp = codex_home / "config.toml"
+            if builtin:
+                import tomlkit
+                doc = tomlkit.parse(cfgp.read_text(encoding="utf-8"))
+                doc["model"] = builtin[0]
+                cfgp.write_text(tomlkit.dumps(doc), encoding="utf-8")
+                time.sleep(5)
+                c1 = tomllib.loads(cfgp.read_text(encoding="utf-8"))
+                check("picker sync: built-in model -> default provider", "model_provider" not in c1, c1.get("model_provider"))
+                doc = tomlkit.parse(cfgp.read_text(encoding="utf-8"))
+                doc["model"] = "agent-pro-2"
+                cfgp.write_text(tomlkit.dumps(doc), encoding="utf-8")
+                time.sleep(5)
+                c2 = tomllib.loads(cfgp.read_text(encoding="utf-8"))
+                check("picker sync: provider model -> its provider",
+                      c2.get("model_provider") in ("e2e-gateway", "e2e-second", "e2e-chat-only"), c2.get("model_provider"))
         finally:
             mock2.terminate()
             try:
@@ -237,9 +264,16 @@ def main() -> int:
                 check("installed app runs", rc == 0 and data.get("raw") == "1.0.0", data)
             unins = Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Agentsii" / "unins000.exe"
             if unins.exists():
-                up = subprocess.run([str(unins), "/VERYSILENT", "/SUPPRESSMSGBOXES"], timeout=300)
-                time.sleep(3)
+                up = subprocess.run([str(unins), "/VERYSILENT", "/SUPPRESSMSGBOXES"], timeout=300, env=env)
+                time.sleep(5)
                 check("uninstaller removes app", up.returncode == 0 and not installed.exists())
+                after = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+                check("uninstall detached all Agentsii providers, kept user settings",
+                      not any(k.startswith("e2e-") for k in after.get("model_providers", {}))
+                      and after.get("mcp_servers", {}).get("demo", {}).get("command") == "npx"
+                      and "model_catalog_json" not in after, list(after.get("model_providers", {})))
+                ck = subprocess.run(["cmdkey", "/list"], capture_output=True, text=True).stdout
+                check("uninstall removed stored keys", "agentsii-codex:" not in ck)
     finally:
         mock.terminate()
         for pid in ("e2e-gateway", "e2e-second", "e2e-chat-only"):

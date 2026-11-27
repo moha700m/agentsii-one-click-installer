@@ -8,7 +8,7 @@ from typing import Callable
 
 import httpx
 
-from . import bridge, codex, credentials
+from . import bridge, catalog, codex, credentials, system
 from .credentials import CredentialError
 from .logutil import log, register_secret
 from .provider import (MAX_MODELS_TO_TEST, is_model_specific, normalize_base_url, ProbeReport, ProviderClient, ProviderError, pick_default,
@@ -41,6 +41,9 @@ class Result:
     supports_chat: bool = False
     bridged: bool = False
     codex_base_url: str = ""
+    picker: str = ""
+    service_running: bool = False
+    autostart: bool = False
     backup_path: str = ""
     config_path: str = ""
     credential_backend: str = ""
@@ -207,24 +210,44 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
             raise StageFailure("helper_failed", str(e)) from e
         res.codex_base_url = res.base_url
         try:
-            reg_before = bridge.load_registry()
+            port, prev_reg = bridge.register_provider(
+                res.provider_id, res.base_url, models=res.added, bridged=res.bridged,
+                service_cmd=system.service_command(), name=res.provider_name,
+                context={m: report.context[m] for m in res.added if m in report.context})
+            changes.on_rollback.append(lambda: bridge.save_registry(prev_reg))
             if res.bridged:
-                port, prev_reg = bridge.register_provider(res.provider_id, res.base_url)
                 res.codex_base_url = bridge.local_base_url(port, res.provider_id)
-                changes.on_rollback.append(lambda: bridge.save_registry(prev_reg))
-            elif res.provider_id in reg_before.get("providers", {}):
-                prev_reg = json.loads(json.dumps(reg_before))
-                reg_before["providers"].pop(res.provider_id)
-                bridge.save_registry(reg_before)
-                changes.on_rollback.append(lambda: bridge.save_registry(prev_reg))
         except OSError as e:
-            raise StageFailure("config_write_failed", f"bridge: {e}") from e
+            raise StageFailure("config_write_failed", f"registry: {e}") from e
+
+        # Model picker: Codex's bundled catalog + every Agentsii provider model.
+        catalog_file = None
+        try:
+            owner = catalog.config_catalog_owner(codex.load_config(inst.config_path))
+            bundled = catalog.bundled_catalog(inst.cli_path) if owner != "user" else None
+            if owner == "user":
+                res.picker = "user_catalog"
+            elif bundled is None:
+                res.picker = "unavailable"
+            else:
+                cat, _ = catalog.build_catalog(bundled, bridge.load_registry()["providers"])
+                catalog_file = catalog.catalog_path(inst.home)
+                if catalog_file.exists():
+                    changes.overwritten_files[catalog_file] = catalog_file.read_bytes()
+                else:
+                    changes.created_files.append(catalog_file)
+                catalog_file.write_text(json.dumps(cat, indent=1, ensure_ascii=False), encoding="utf-8")
+                res.picker = "updated"
+        except OSError as e:
+            log.error("model catalog skipped: %s", e)
+            res.picker = "unavailable"
+            catalog_file = None
         try:
             res.profiles = codex.apply_provider(
                 inst, changes, provider_id=res.provider_id, display_name=res.provider_name,
                 base_url=res.codex_base_url, bridged=res.bridged, auth_command=auth_cmd,
                 auth_args=[*auth_base_args, "--provider", res.provider_id],
-                models=res.added, default_model=res.default_model)
+                models=res.added, default_model=res.default_model, catalog_file=catalog_file)
         except Exception as e:  # noqa: BLE001
             raise StageFailure("config_write_failed", str(e)[:200]) from e
         cb.stage_done(5, res.provider_id)
@@ -245,6 +268,10 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
                                        auth_cmd, res.profiles if inst.uses_profile_files else [])
         if problems:
             raise StageFailure("verify_failed", "; ".join(problems))
+        # Background service: local bridge + keeps model_provider in sync with the Codex model picker.
+        res.service_running = system.ensure_service()
+        if res.bridged and not res.service_running:
+            raise StageFailure("verify_bridge", "background service did not start")
         try:
             token = credentials.run_auth_helper(auth_cmd, auth_base_args, res.provider_id)
         except Exception as e:  # noqa: BLE001
@@ -252,7 +279,7 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
         if hashlib.sha256(token.encode()).digest() != hashlib.sha256(api_key.encode()).digest():
             raise StageFailure("verify_helper", "token mismatch")
         if res.bridged:
-            # The helper has started the bridge; prove Codex's exact path works end to end.
+            # Prove Codex's exact path works end to end (Responses -> bridge -> provider).
             bc = ProviderClient(res.codex_base_url, api_key, transport=transport)
             try:
                 check = bc.test_responses(res.default_model)
@@ -260,6 +287,7 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
                 bc.close()
             if not check.compatible:
                 raise StageFailure("verify_bridge", check.reason)
+        res.autostart = system.set_autostart(True)
         cb.stage_done(7, "ok")
         res.ok = True
         log.info("SUCCESS provider=%s models=%d default=%s", res.provider_id, len(res.added), res.default_model)

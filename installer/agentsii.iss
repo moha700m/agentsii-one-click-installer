@@ -27,6 +27,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 CloseApplications=yes
+SetupMutex=AgentsiiSetupMutex
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -48,6 +49,12 @@ Name: "{group}\دليل الاستخدام (Arabic Guide)"; Filename: "{app}\Use
 Name: "{group}\User Guide"; Filename: "{app}\UserGuide-EN.html"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Agentsii API Installer"; Filename: "{app}\AgentsiiInstaller.exe"; Tasks: desktopicon
+
+[UninstallRun]
+Filename: "{app}\AgentsiiInstaller.exe"; Parameters: "--uninstall-cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "AgentsiiCleanup"
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\Agentsii\bin"
 
 [Run]
 Filename: "{app}\AgentsiiInstaller.exe"; Description: "{cm:LaunchProgram,Agentsii}"; Flags: nowait postinstall skipifsilent

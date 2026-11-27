@@ -76,7 +76,7 @@ def _self_cmd() -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if "--bridge" in argv:
+    if "--bridge" in argv:  # headless bridge (tests / diagnostics)
         return _bridge_module().serve()
     if "--version" in argv:
         _write_stdout(b"agentsii-auth 1.0.0\n")
@@ -97,9 +97,10 @@ def main(argv: list[str] | None = None) -> int:
         return 4
     try:
         bridge = _bridge_module()
-        if provider_id in bridge.load_registry().get("providers", {}):
-            if not bridge.ensure_running(_self_cmd() + ["--bridge"]):
-                _write_stderr("agentsii-auth: could not start the Agentsii local bridge "
+        prov = bridge.load_registry().get("providers", {}).get(provider_id)
+        if prov and prov.get("bridged"):
+            if not bridge.start_service_from_helper():
+                _write_stderr("agentsii-auth: the Agentsii background service is not running and could not be started "
                               f"(port {bridge.load_registry().get('port')}).")
                 return 6
     except Exception as e:  # noqa: BLE001

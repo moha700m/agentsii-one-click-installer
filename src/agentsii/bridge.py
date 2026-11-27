@@ -11,7 +11,8 @@ SSE events (text, function tools, freeform/custom tools, usage).
 * listens on 127.0.0.1 only
 * the API key is not stored here: Codex sends it (obtained from Windows
   Credential Manager through agentsii-auth.exe) and the bridge forwards it
-* started on demand by agentsii-auth.exe, exits after being idle
+* runs inside the Agentsii background service (tray), which starts with
+  Windows; agentsii-auth.exe starts the service if Codex needs it
 """
 from __future__ import annotations
 
@@ -28,7 +29,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-IDLE_EXIT_SECONDS = 3 * 3600
 HEALTH_PATH = "/agentsii-bridge/health"
 _LAST_ACTIVITY = time.time()
 
@@ -89,24 +89,57 @@ def is_bridge_running(port: int, timeout: float = 1.5) -> bool:
         return False
 
 
-def register_provider(provider_id: str, upstream: str) -> tuple[int, dict]:
+def _pick_port(current: int) -> int:
+    if current and (_port_free(current) or is_bridge_running(current)):
+        return current
+    for cand in (17821, 17822, 17823, 27821, 37821):
+        if _port_free(cand) or is_bridge_running(cand):
+            return cand
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def ensure_port() -> tuple[int, dict]:
+    data = load_registry()
+    previous = json.loads(json.dumps(data))
+    port = _pick_port(int(data.get("port") or 0))
+    if port != data.get("port"):
+        data["port"] = port
+        save_registry(data)
+    return port, previous
+
+
+def register_provider(provider_id: str, upstream: str, models: list[str] | None = None,
+                      bridged: bool = True, service_cmd: list[str] | None = None,
+                      name: str = "", context: dict | None = None) -> tuple[int, dict]:
     """Add/replace a provider; returns (port, previous_registry) for rollback."""
     data = load_registry()
     previous = json.loads(json.dumps(data))
-    port = int(data.get("port") or 0)
-    if not port or (not _port_free(port) and not is_bridge_running(port)):
-        for cand in (17821, 17822, 17823, 27821, 37821):
-            if _port_free(cand):
-                port = cand
-                break
-        else:
-            with socket.socket() as s:
-                s.bind(("127.0.0.1", 0))
-                port = s.getsockname()[1]
+    port = _pick_port(int(data.get("port") or 0))
     data["port"] = port
-    data["providers"][provider_id] = {"upstream": upstream.rstrip("/")}
+    if service_cmd:
+        data["service_cmd"] = service_cmd
+    data["providers"][provider_id] = {"upstream": upstream.rstrip("/"), "bridged": bool(bridged),
+                                      "models": list(models or []), "name": name or provider_id,
+                                      "context": dict(context or {})}
     save_registry(data)
     return port, previous
+
+
+def running_pid() -> int | None:
+    port = int(load_registry().get("port") or 0)
+    if not port:
+        return None
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        c.request("GET", HEALTH_PATH)
+        r = c.getresponse()
+        data = json.loads(r.read())
+        c.close()
+        return int(data.get("pid"))
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 def local_base_url(port: int, provider_id: str) -> str:
@@ -447,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
             pid = parts[2]
             rest = "/" + "/".join(parts[4:])
             prov = load_registry()["providers"].get(pid)
-            if not prov:
+            if not prov or not prov.get("bridged", True):
                 return None, "unknown"
             return prov["upstream"], rest
         return None, "notfound"
@@ -592,50 +625,55 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
-def serve(port: int | None = None, idle_exit: float = IDLE_EXIT_SECONDS) -> int:
+def make_server(port: int) -> ThreadingHTTPServer:
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv.daemon_threads = True
+    return srv
+
+
+def serve(port: int | None = None, idle_exit: float | None = None) -> int:
+    """Run the bridge without UI (used by tests / --bridge)."""
     port = port or int(load_registry().get("port") or 0)
     if not port:
         return 2
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        srv = make_server(port)
     except OSError:
         return 0 if is_bridge_running(port) else 3
-    srv.daemon_threads = True
-
-    def watchdog():
-        while True:
-            time.sleep(30)
-            if time.time() - _LAST_ACTIVITY > idle_exit:
-                srv.shutdown()
-                return
-
-    threading.Thread(target=watchdog, daemon=True).start()
+    if idle_exit:
+        def watchdog():
+            while True:
+                time.sleep(30)
+                if time.time() - _LAST_ACTIVITY > idle_exit:
+                    srv.shutdown()
+                    return
+        threading.Thread(target=watchdog, daemon=True).start()
     srv.serve_forever()
     return 0
 
 
-# ------------------------------------------------------------------ launcher (used by agentsii-auth)
-
-def ensure_running(spawn_cmd: list[str], wait: float = 10.0) -> bool:
+def start_service_from_helper(wait: float = 30.0) -> bool:
+    """Called by agentsii-auth when Codex needs a bridged provider and the
+    Agentsii background service is not running. Uses ShellExecute on Windows so
+    the service never inherits Codex's pipes."""
     import subprocess
-    port = int(load_registry().get("port") or 0)
+    reg = load_registry()
+    port = int(reg.get("port") or 0)
     if not port:
         return False
     if is_bridge_running(port):
         return True
-    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                    "stderr": subprocess.DEVNULL, "close_fds": True}
-    if sys.platform == "win32":
-        DETACHED, GROUP, NOWIN, BREAKAWAY = 0x00000008, 0x00000200, 0x08000000, 0x01000000
-        try:
-            subprocess.Popen(spawn_cmd, creationflags=DETACHED | GROUP | NOWIN | BREAKAWAY, **kwargs)
-        except OSError:
-            subprocess.Popen(spawn_cmd, creationflags=DETACHED | GROUP | NOWIN, **kwargs)
+    cmd = reg.get("service_cmd") or []
+    if not cmd:
+        return False
+    if sys.platform == "win32" and cmd[0].lower().endswith(".exe"):
+        os.startfile(cmd[0], arguments=subprocess.list2cmdline(cmd[1:]), show_cmd=0)  # type: ignore[call-arg]
     else:
-        subprocess.Popen(spawn_cmd, start_new_session=True, **kwargs)
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         close_fds=True, start_new_session=(sys.platform != "win32"))
     deadline = time.time() + wait
     while time.time() < deadline:
         if is_bridge_running(port, timeout=0.5):
             return True
-        time.sleep(0.15)
+        time.sleep(0.25)
     return False

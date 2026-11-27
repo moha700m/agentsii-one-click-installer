@@ -89,6 +89,10 @@
   <li><b>ADD ANOTHER API</b>: يعيدك إلى النموذج لإضافة مزوّد آخر.</li>
   <li><b>Show models</b>: يعرض الموديلات المضافة (★ = الافتراضي) والموديلات المستبعدة مع سبب الاستبعاد.</li>
 </ul>
+<h3>قائمة الموديلات داخل Codex</h3>
+<p>يضيف البرنامج موديلات المزوّد إلى <b>قائمة اختيار الموديل داخل Codex نفسه</b> (CLI وDesktop) مع الإبقاء على كل موديلات OpenAI الأصلية. اختر الموديل من القائمة كالمعتاد، وخدمة Agentsii في الخلفية تضبط المزوّد الصحيح تلقائياً. أعد تشغيل Codex بالكامل بعد الربط ليظهر التحديث (زر OPEN CODEX يعرض ذلك عليك).</p>
+<h3>خدمة الخلفية (أيقونة بجانب الساعة)</h3>
+<p>بعد النجاح تعمل خدمة صغيرة في شريط المهام وتبدأ مع Windows. وظيفتها: تشغيل الجسر المحلي للمزوّدات التي تدعم Chat Completions فقط، ومزامنة المزوّد مع الموديل الذي تختاره في Codex. من قائمتها يمكنك فتح Codex أو إيقاف التشغيل مع Windows أو الإنهاء.</p>
 <h3>استخدام موديل آخر غير الافتراضي</h3>
 <p>لكل موديل متوافق يُنشأ Profile رسمي في Codex باسم <span class="ltr">agentsii-&lt;provider&gt;-&lt;model&gt;</span>. مثال:</p>
 <pre>codex --profile agentsii-my-gateway-model-name</pre>
@@ -138,7 +142,8 @@ refresh_interval_ms = 0</pre>
 <ul>
   <li><b>استرجاع الإعدادات السابقة:</b> انسخ آخر ملف من <span class="ltr">.codex\agentsii-backups\</span> فوق <span class="ltr">.codex\config.toml</span>.</li>
   <li><b>حذف المفتاح:</b> Credential Manager ← Windows Credentials ← احذف <span class="ltr">agentsii-codex:&lt;provider&gt;</span>.</li>
-  <li><b>إلغاء التثبيت:</b> من «Apps &amp; features». لا يحذف إلغاء التثبيت أداة <span class="ltr">agentsii-auth.exe</span> عمداً حتى لا يتعطل Codex؛ احذف المزوّد من الإعدادات أولاً ثم احذف <span class="ltr">%LOCALAPPDATA%\Agentsii</span>.</li>
+  <li><b>إلغاء التثبيت:</b> من «Apps &amp; features». يأخذ نسخة احتياطية ثم يزيل كل ما أضافه Agentsii فقط (المزوّدات، قائمة الموديلات، الـ Profiles، المفاتيح، خدمة الخلفية) ويعيد Codex إلى مزوّده الافتراضي، مع إبقاء تسجيل دخولك وبقية إعداداتك.</li>
+  <li><b>النسخة المحمولة:</b> قبل حذفها شغّل: <span class="ltr">AgentsiiPortable.exe --uninstall-cleanup</span> لنفس التنظيف.</li>
 </ul>
 </main>
 </body>

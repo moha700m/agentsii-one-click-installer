@@ -21,6 +21,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTSII_ALLOW_ANY_KEYRING", "1")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    helper = ROOT / "src" / "agentsii" / "auth_helper.py"
+    monkeypatch.setenv("AGENTSII_SERVICE_CMD", f'"{sys.executable}" "{helper}" --bridge')
     import keyring
     import fakekeyring
     keyring.set_keyring(fakekeyring.FileKeyring())
@@ -28,12 +30,8 @@ def isolated(tmp_path, monkeypatch):
     # stop any bridge a test started (it belongs to this test's registry)
     import json as _json, os as _os, signal as _signal
     from agentsii import bridge
-    port = int(bridge.load_registry().get("port") or 0)
-    if port and bridge.is_bridge_running(port):
-        import http.client
-        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-        c.request("GET", bridge.HEALTH_PATH)
-        pid = _json.loads(c.getresponse().read()).get("pid")
+    pid = bridge.running_pid()
+    if True:
         if pid and pid != _os.getpid():
             try:
                 _os.kill(pid, _signal.SIGTERM)

@@ -499,6 +499,10 @@ class MainWindow(QMainWindow):
                 (t("r_added"), str(len(res.added))),
                 (t("r_default"), res.default_model),
                 (t("r_mode"), t("mode_bridge") if res.bridged else t("mode_direct")),
+                (t("r_picker"), t("picker_updated", n=len(res.added)) if res.picker == "updated"
+                 else t(f"picker_{res.picker or 'unavailable'}")),
+                (t("r_service"), t("service_auto") if res.autostart
+                 else (t("service_on") if res.service_running else t("service_off"))),
                 (t("r_config"), t("r_updated")),
                 (t("r_creds"), t("r_secured")),
             ]
@@ -534,6 +538,14 @@ class MainWindow(QMainWindow):
     def _main_action(self):
         if self.result and self.result.ok:
             inst = self.result.codex or codex.detect()
+            from . import system
+            running = system.running_codex_desktop()
+            if running:
+                t = self.tr_
+                ans = QMessageBox.question(self, t("restart_title"), t("restart_body"),
+                                           QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if ans == QMessageBox.Yes:
+                    system.close_codex_desktop(running)
             if not codex.open_codex(inst):
                 QMessageBox.information(self, APP_NAME, self.tr_("codex_open_failed"))
         else:
@@ -636,6 +648,7 @@ def screenshots(outdir: str) -> int:
         w._on_started(i)
         w._on_done(i, {3: "9/12", 4: "codex-cli 0.163.0", 5: "my-gateway", 6: "keyring.backends.Windows.WinVaultKeyring", 7: "ok"}[i])
     r = pipeline.Result(ok=True, provider_name="My Gateway", provider_id="my-gateway", discovered=14,
+                        picker="updated", service_running=True, autostart=True,
                         tested=12, added=[f"model-{i}" for i in range(9)], default_model="model-0",
                         backup_path=r"C:\Users\you\.codex\agentsii-backups\config.toml.bak",
                         config_path=r"C:\Users\you\.codex\config.toml")

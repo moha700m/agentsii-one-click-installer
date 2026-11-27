@@ -77,7 +77,25 @@ class CodexInstall:
         return self.cli_version is None or self.cli_version >= NEW_PROFILE_FILES_VERSION
 
 
+def _newest(paths):
+    paths = [p for p in paths if p.is_file()]
+    return str(max(paths, key=lambda p: p.stat().st_mtime)) if paths else None
+
+
 def _find_cli() -> str | None:
+    if os.environ.get("CODEX_CLI_PATH") and Path(os.environ["CODEX_CLI_PATH"]).exists():
+        return os.environ["CODEX_CLI_PATH"]
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            root = Path(local) / "OpenAI" / "Codex" / "bin"
+            if root.is_dir():
+                try:
+                    found = _newest(list(root.rglob("codex.exe")))
+                    if found:
+                        return found
+                except OSError:
+                    pass
     found = shutil.which("codex")
     if found:
         return found
@@ -122,13 +140,17 @@ def _find_desktop() -> tuple[str | None, str | None]:
         if c.exists():
             return str(c), None
     try:
-        ps = ("Get-StartApps | Where-Object { $_.Name -like 'Codex*' } | "
+        ps = ("$p = Get-AppxPackage -Name '*OpenAI.Codex*' -ErrorAction SilentlyContinue | Select-Object -First 1; "
+              "if ($p) { $exe = Join-Path $p.InstallLocation 'app\\Codex.exe'; if (Test-Path $exe) { 'PATH:' + $exe } }; "
+              "Get-StartApps | Where-Object { $_.Name -like 'Codex*' } | "
               "Select-Object -First 1 -ExpandProperty AppID")
         out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                              capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW)
-        appid = (out.stdout or "").strip()
-        if appid:
-            return None, appid
+        lines = [l.strip() for l in (out.stdout or "").splitlines() if l.strip()]
+        path = next((l[5:] for l in lines if l.startswith("PATH:")), None)
+        appid = next((l for l in lines if not l.startswith("PATH:")), None)
+        if path or appid:
+            return path, appid
     except (OSError, subprocess.SubprocessError):
         pass
     return None, None
@@ -251,6 +273,7 @@ def apply_provider(
     models: list[str],
     default_model: str,
     bridged: bool = False,
+    catalog_file: Path | None = None,
 ) -> list[str]:
     """Write provider, default model and one profile per compatible model.
     Returns the profile names created."""
@@ -258,6 +281,8 @@ def apply_provider(
 
     doc["model_provider"] = provider_id
     doc["model"] = default_model
+    if catalog_file is not None:
+        doc["model_catalog_json"] = str(catalog_file)
 
     if "model_providers" not in doc:
         doc["model_providers"] = tomlkit.table(is_super_table=True)
@@ -378,8 +403,17 @@ def verify_config(inst: CodexInstall, provider_id: str, base_url: str, default_m
 
 # ------------------------------------------------------------------ launch
 
-def open_codex(inst: CodexInstall) -> bool:
+def open_codex(inst: CodexInstall, workspace: Path | None = None) -> bool:
+    """Open Codex Desktop (`codex app <folder>`, like the official launcher),
+    falling back to the desktop executable, then to the CLI in a terminal."""
+    from .catalog import cli_command
+    ws = str(workspace or Path.home())
     try:
+        if inst.cli_path and (inst.desktop_path or inst.desktop_appid):
+            subprocess.Popen(cli_command(inst.cli_path) + ["app", ws], cwd=ws, close_fds=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=_NO_WINDOW)
+            return True
         if inst.desktop_path:
             subprocess.Popen([inst.desktop_path], close_fds=True)
             return True
@@ -388,10 +422,10 @@ def open_codex(inst: CodexInstall) -> bool:
             return True
         if inst.cli_path and sys.platform == "win32":
             subprocess.Popen(["cmd.exe", "/c", "start", "Codex", "cmd.exe", "/k", inst.cli_path],
-                             cwd=str(Path.home()), close_fds=True)
+                             cwd=ws, close_fds=True)
             return True
         if inst.cli_path:
-            subprocess.Popen([inst.cli_path], cwd=str(Path.home()))
+            subprocess.Popen([inst.cli_path], cwd=ws)
             return True
     except OSError as e:
         log.error("open codex failed: %s", e)
