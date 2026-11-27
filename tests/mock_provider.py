@@ -113,19 +113,23 @@ def make_handler(key: str, responses_enabled: bool, record: list, models_path: s
             shell = None
             for t in body.get("tools") or []:
                 fn = t.get("function") or {}
-                if "shell" in (fn.get("name") or "") and fn.get("name") != "local_shell":
+                name = fn.get("name") or ""
+                if name == "exec_command" or ("shell" in name and name != "local_shell"):
                     shell = fn
                     break
             last_user = next((m for m in reversed(msgs) if isinstance(m, dict) and m.get("role") == "user"), {})
             wants_tool = "RUN_TOOL" in str(last_user.get("content"))
             if shell and wants_tool and not has_tool_result:
                 props = (shell.get("parameters") or {}).get("properties") or {}
-                ctype = (props.get("command") or {}).get("type")
-                if ctype == "array":
-                    cmd = ["cmd.exe", "/c", "echo AGENTSII_TOOL_OK"] if sys.platform == "win32" else ["echo", "AGENTSII_TOOL_OK"]
+                if "cmd" in props:
+                    args = json.dumps({"cmd": "echo AGENTSII_TOOL_OK"})
                 else:
-                    cmd = "echo AGENTSII_TOOL_OK"
-                args = json.dumps({"command": cmd})
+                    ctype = (props.get("command") or {}).get("type")
+                    if ctype == "array":
+                        cmd = ["cmd.exe", "/c", "echo AGENTSII_TOOL_OK"] if sys.platform == "win32" else ["echo", "AGENTSII_TOOL_OK"]
+                    else:
+                        cmd = "echo AGENTSII_TOOL_OK"
+                    args = json.dumps({"command": cmd})
                 chunk({"role": "assistant", "tool_calls": [{"index": 0, "id": "call_mock1", "type": "function",
                                                             "function": {"name": shell["name"], "arguments": ""}}]})
                 chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[:10]}}]})

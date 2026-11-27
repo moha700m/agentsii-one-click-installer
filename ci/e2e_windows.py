@@ -223,7 +223,7 @@ def main() -> int:
                 time.sleep(2)
                 reqs = [json.loads(l) for l in record2.read_text().splitlines()] if record2.exists() else []
                 codex_reqs = [r for r in reqs if r.get("path") == "/v1/chat/completions" and r.get("stream")
-                              and any("shell" in (n or "") for n in r.get("tool_names") or [])]
+                              and any(n in ("exec_command", "shell", "shell_command") for n in r.get("tool_names") or [])]
                 check("Codex reached chat-only provider through bridge (bridge auto-started)", codex_reqs,
                       (cx3.stdout + cx3.stderr)[-1500:])
                 check("bridge forwarded the Credential Manager key", codex_reqs and all(r["auth_ok"] for r in codex_reqs))
