@@ -1,0 +1,18 @@
+name: diag
+on:
+  push:
+    branches: [diag]
+jobs:
+  d:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r requirements-build.txt
+      - shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          pyinstaller --noconfirm --onefile --windowed --name agentsii-auth --paths "$root/src" --workpath build/auth --specpath build/auth auth_launcher.py
+          pip show pyinstaller | Select-String Version
+      - run: python ci/diag_helper.py
