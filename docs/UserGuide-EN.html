@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Agentsii One-Click API Installer - User Guide</title>
+<style>body{margin:0;background:#0A0E16;color:#E6EDF7;font-family:"Segoe UI",Arial,sans-serif;line-height:1.7}main{max-width:820px;margin:0 auto;padding:36px 22px}h2{border-bottom:1px solid #1F2A3D;padding-bottom:6px;margin-top:30px}code,pre{background:#0F1522;border:1px solid #1F2A3D;border-radius:6px;padding:1px 6px;font-family:Consolas,monospace}pre{padding:12px;overflow:auto}</style></head>
+<body><main>
+<h1>Agentsii One-Click API Installer</h1>
+<p>Connect any OpenAI-Codex-compatible API provider in one click. The full guide is in Arabic (<code>UserGuide-AR.html</code>); this is the short version.</p>
+<h2>Use</h2>
+<ol><li>Open the app.</li><li>Enter <b>Provider Name</b>, <b>API Base URL</b> and <b>API Key</b>.</li><li>Click <b>ONE-CLICK CONNECT</b>.</li></ol>
+<h2>What happens</h2>
+<p>URL and key are checked against the provider, models are read from <code>/models</code> (never invented), each candidate model gets a real streamed Responses API call with a function tool (what Codex needs; current Codex supports only <code>wire_api = "responses"</code>), Codex is detected (respecting <code>CODEX_HOME</code>), <code>config.toml</code> is backed up, the provider and default model are written, one Codex profile per compatible model is created, the key is stored in Windows Credential Manager and Codex reads it through the official command-backed auth (<code>[model_providers.&lt;id&gt;.auth]</code>). Any failure after changes started restores everything.</p>
+<pre>codex --profile agentsii-&lt;provider&gt;-&lt;model&gt;</pre>
+<h2>Security</h2>
+<p>The key only goes to your provider and to Windows Credential Manager; it is never written to config files, environment variables or logs, and never sent to Agentsii. Existing providers are never replaced without your approval.</p>
+<h2>Files</h2>
+<p>Log: <code>%LOCALAPPDATA%\Agentsii\logs\agentsii.log</code> · Backups: <code>.codex\agentsii-backups\</code> · Auth helper: <code>%LOCALAPPDATA%\Agentsii\bin\agentsii-auth.exe</code></p>
+<p>SmartScreen may warn because the files are not code-signed yet: More info → Run anyway.</p>
+</main></body></html>

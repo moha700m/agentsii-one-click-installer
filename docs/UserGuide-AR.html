@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دليل استخدام Agentsii One-Click API Installer</title>
+<style>
+  :root { --bg:#0A0E16; --card:#111827; --border:#1F2A3D; --text:#E6EDF7; --muted:#8B98AE; --a1:#22D3EE; --a2:#8B5CF6; --ok:#34D399; --err:#F87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI", Tahoma, Arial, sans-serif; line-height:1.85; font-size:16px; }
+  main { max-width: 860px; margin: 0 auto; padding: 40px 22px 70px; }
+  header { display:flex; align-items:center; gap:16px; margin-bottom: 26px; }
+  .logo { width:56px; height:56px; border-radius:14px; background:linear-gradient(135deg,var(--a1),var(--a2)); display:grid; place-items:center; font-weight:900; font-size:28px; color:#fff; }
+  h1 { font-size: 26px; margin: 0; }
+  .sub { color: var(--muted); margin:0; }
+  h2 { font-size: 20px; margin: 34px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16.5px; margin: 20px 0 6px; color: var(--a1); }
+  .card { background: var(--card); border:1px solid var(--border); border-radius: 14px; padding: 16px 20px; margin: 12px 0; }
+  code, .ltr { direction: ltr; unicode-bidi: embed; font-family: Consolas, "Cascadia Mono", monospace; background:#0F1522; border:1px solid var(--border); border-radius:6px; padding: 1px 6px; font-size: 14px; }
+  pre { direction: ltr; text-align:left; background:#0F1522; border:1px solid var(--border); border-radius:10px; padding:12px 14px; overflow:auto; font-size:13.5px; }
+  table { width:100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { border:1px solid var(--border); padding: 8px 10px; text-align:right; vertical-align: top; }
+  th { background:#0F1522; color: var(--muted); font-weight:600; }
+  .ok { color: var(--ok); font-weight: 700; } .err { color: var(--err); font-weight:700; }
+  .note { border-right: 4px solid var(--a1); }
+  .warn { border-right: 4px solid #F59E0B; }
+  ol li, ul li { margin: 4px 0; }
+  @media print { body { background:#fff; color:#111; } .card, pre, code, th { background:#f5f7fa; border-color:#ccd; } h3 { color:#0e7490; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="logo">A</div>
+  <div>
+    <h1>دليل استخدام Agentsii One-Click API Installer</h1>
+    <p class="sub">ربط أي مزوّد API متوافق مع OpenAI Codex بضغطة واحدة — الإصدار 1.0.0</p>
+  </div>
+</header>
+
+<h2>1. ما الذي يفعله البرنامج؟</h2>
+<p>تكتب ثلاثة أشياء فقط: <b>اسم المزوّد</b> و<b>رابط الـ API</b> و<b>المفتاح</b>، ثم تضغط <b>ONE-CLICK CONNECT</b>. يتولى البرنامج الباقي: يتحقق من الرابط والمفتاح، ويكتشف الموديلات من المزوّد نفسه، ويختبر كل موديل اختباراً حقيقياً، ثم يضيف الموديلات المتوافقة فقط إلى إعدادات Codex، ويحفظ المفتاح في <b>Windows Credential Manager</b>.</p>
+<p>لا تحتاج إلى Terminal، ولا إلى تعديل <span class="ltr">config.toml</span> يدوياً، ولا إلى كتابة أسماء الموديلات، ولا إلى رصيد OpenAI.</p>
+
+<h2>2. المتطلبات</h2>
+<ul>
+  <li>Windows 10 أو Windows 11 (64-bit).</li>
+  <li>OpenAI Codex مثبّت: Codex CLI، أو تطبيق Codex Desktop الذي يقرأ الإعدادات من <span class="ltr">config.toml</span>.</li>
+  <li>مزوّد يدعم <b>OpenAI Responses API</b> ويوفر قائمة موديلات <span class="ltr">/models</span>.</li>
+  <li>لا تحتاج إلى تثبيت Python أو أي مكتبة.</li>
+</ul>
+
+<h2>3. أي ملف أستخدم؟</h2>
+<table>
+  <tr><th>الملف</th><th>متى تستخدمه</th></tr>
+  <tr><td><span class="ltr">AgentsiiSetup.exe</span></td><td>مثبّت Windows. يثبّت البرنامج لحسابك فقط (بدون صلاحيات مدير)، ويضيف اختصاراً في قائمة ابدأ وهذا الدليل. <b>الخيار الموصى به.</b></td></tr>
+  <tr><td><span class="ltr">AgentsiiPortable.exe</span></td><td>نسخة محمولة بملف واحد، تعمل مباشرة دون تثبيت (من فلاشة أو من مجلد التنزيلات).</td></tr>
+  <tr><td><span class="ltr">AgentsiiInstaller.exe</span></td><td>الملف التنفيذي للبرنامج بعد التثبيت (داخل مجلد البرنامج). موجود أيضاً في <span class="ltr">AgentsiiInstaller-app.zip</span>.</td></tr>
+</table>
+<div class="card warn"><b>تنبيه SmartScreen:</b> الملفات غير موقّعة رقمياً بعد، لذا قد يظهر تحذير «Windows protected your PC» عند أول تشغيل. اضغط <b>More info</b> ثم <b>Run anyway</b>. لإزالة هذا التحذير نهائياً يجب توقيع الملفات بشهادة Code Signing.</div>
+
+<h2>4. خطوات الاستخدام</h2>
+<ol>
+  <li>افتح البرنامج.</li>
+  <li>اكتب <b>Provider Name</b> — أي اسم تختاره، مثل <span class="ltr">My Gateway</span>. يُستخدم كمعرّف المزوّد داخل Codex (مثلاً <span class="ltr">my-gateway</span>).</li>
+  <li>اكتب <b>API Base URL</b> — مثل <span class="ltr">https://api.example.com/v1</span>. إذا نسيت <span class="ltr">/v1</span> سيجرّبه البرنامج تلقائياً، وإذا ألصقت رابطاً كاملاً مثل <span class="ltr">…/v1/chat/completions</span> سيصححه.</li>
+  <li>الصق <b>API Key</b>.</li>
+  <li>اضغط <b>ONE-CLICK CONNECT</b> وراقب المراحل.</li>
+</ol>
+<p>يمكنك التبديل بين العربية والإنجليزية من الزر أعلى النافذة.</p>
+
+<h2>5. المراحل الثماني</h2>
+<table>
+  <tr><th>المرحلة</th><th>ما يحدث فعلياً</th></tr>
+  <tr><td>[1] Checking API URL</td><td>يتحقق من صيغة الرابط ويتصل بالمزوّد مباشرة. يرفض <span class="ltr">http://</span> للخوادم البعيدة حتى لا يُرسل مفتاحك دون تشفير (مسموح فقط لـ localhost والشبكة المحلية).</td></tr>
+  <tr><td>[2] Verifying API Key</td><td>يطلب قائمة الموديلات بالمفتاح؛ إذا رفضه المزوّد (401/403) يتوقف فوراً.</td></tr>
+  <tr><td>[3] Discovering Models</td><td>يقرأ كل الموديلات من <span class="ltr">/models</span> ويستبعد غير المناسبة لوكيل برمجي (Embeddings، صوت، صور، Moderation...). <b>لا يخترع أي اسم موديل.</b></td></tr>
+  <tr><td>[4] Checking Codex Compatibility</td><td>يكتشف دعم <span class="ltr">Responses API</span> و<span class="ltr">Chat Completions</span>، ثم يرسل لكل موديل طلباً حقيقياً متدفقاً (Streaming) مع Function Tool كما يفعل Codex. يُضاف فقط الموديل الذي ينجح.</td></tr>
+  <tr><td>[5] Detecting Codex Installation</td><td>يجد Codex CLI وCodex Desktop ومجلد الإعدادات، ويحترم <span class="ltr">CODEX_HOME</span> إن وُجد (وإلا <span class="ltr">%USERPROFILE%\.codex</span>).</td></tr>
+  <tr><td>[6] Configuring Provider</td><td>ينشئ نسخة احتياطية من <span class="ltr">config.toml</span> أولاً، ثم يضيف المزوّد والموديلات ويضبط الموديل الافتراضي، مع الحفاظ على كل إعداداتك وتعليقاتك السابقة.</td></tr>
+  <tr><td>[7] Securing API Credentials</td><td>يحفظ المفتاح في Windows Credential Manager فقط.</td></tr>
+  <tr><td>[8] Final Verification</td><td>يعيد قراءة الإعدادات ويتأكد أن Codex سيتمكن من قراءة المفتاح فعلاً.</td></tr>
+</table>
+<div class="card note">إذا فشلت أي مرحلة بعد بدء التعديل، يُعيد البرنامج <b>كل شيء</b> كما كان: ملف الإعدادات، وملفات الـ Profiles، وبيانات الاعتماد. ولا تظهر رسالة <span class="ok">SUCCESS!</span> إلا إذا نجحت كل المراحل فعلاً.</div>
+
+<h2>6. بعد النجاح</h2>
+<ul>
+  <li><b>OPEN CODEX</b>: يفتح Codex Desktop إن وُجد، وإلا يفتح Codex CLI في نافذة جديدة. المزوّد الجديد أصبح هو الافتراضي.</li>
+  <li><b>ADD ANOTHER API</b>: يعيدك إلى النموذج لإضافة مزوّد آخر.</li>
+  <li><b>Show models</b>: يعرض الموديلات المضافة (★ = الافتراضي) والموديلات المستبعدة مع سبب الاستبعاد.</li>
+</ul>
+<h3>استخدام موديل آخر غير الافتراضي</h3>
+<p>لكل موديل متوافق يُنشأ Profile رسمي في Codex باسم <span class="ltr">agentsii-&lt;provider&gt;-&lt;model&gt;</span>. مثال:</p>
+<pre>codex --profile agentsii-my-gateway-model-name</pre>
+<p>أو مرّر اسم الموديل مباشرة: <span class="ltr">codex -m model-name</span>. الأسماء الدقيقة تظهر في «Show models».</p>
+
+<h2>7. ماذا يكتب البرنامج في إعدادات Codex؟</h2>
+<pre># %USERPROFILE%\.codex\config.toml  (أو CODEX_HOME)
+model_provider = "my-gateway"
+model = "best-compatible-model"
+
+[model_providers.my-gateway]
+name = "My Gateway"
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+
+[model_providers.my-gateway.auth]
+command = "C:\\Users\\you\\AppData\\Local\\Agentsii\\bin\\agentsii-auth.exe"
+args = ["--provider", "my-gateway"]
+timeout_ms = 20000
+refresh_interval_ms = 0</pre>
+<p>هذه هي طريقة Codex الرسمية للمصادقة عبر أمر (<span class="ltr">command-backed auth</span>): عندما يحتاج Codex المفتاح يشغّل <span class="ltr">agentsii-auth.exe</span> الذي يقرأه من Credential Manager ويسلّمه لـ Codex مباشرة. <b>المفتاح لا يُكتب في أي ملف ولا في متغيرات البيئة ولا في السجلات.</b></p>
+
+<h2>8. الأمان والخصوصية</h2>
+<ul>
+  <li>المفتاح يُرسل فقط إلى المزوّد الذي كتبته، ولا يُرسل إلى Agentsii أو أي جهة أخرى.</li>
+  <li>يُحفظ في Windows Credential Manager باسم <span class="ltr">agentsii-codex:&lt;provider&gt;</span> (لوحة التحكم ← Credential Manager ← Windows Credentials).</li>
+  <li>لا يُطبع المفتاح في السجل: <span class="ltr">%LOCALAPPDATA%\Agentsii\logs\agentsii.log</span>.</li>
+  <li>نسخة احتياطية قبل أي تعديل في <span class="ltr">.codex\agentsii-backups\</span>.</li>
+  <li>لا يستبدل مزوّداً موجوداً بنفس الاسم إلا بعد موافقتك.</li>
+  <li>لا يحتوي البرنامج على أي مفاتيح افتراضية.</li>
+</ul>
+
+<h2>9. حل المشكلات</h2>
+<table>
+  <tr><th>الرسالة</th><th>المعنى والحل</th></tr>
+  <tr><td>رفض المزوّد هذا المفتاح (401/403)</td><td>المفتاح خاطئ أو منتهٍ أو بلا صلاحية. انسخه من جديد من لوحة المزوّد.</td></tr>
+  <tr><td>المزوّد لا يوفّر قائمة موديلات</td><td>المزوّد لا يدعم <span class="ltr">/models</span>. البرنامج لن يخترع أسماء موديلات، لذا لا يمكن الإكمال تلقائياً.</td></tr>
+  <tr><td>المزوّد لا يدعم Responses API</td><td>إصدار Codex الحالي يدعم <span class="ltr">wire_api = "responses"</span> فقط. المزوّدات التي تدعم Chat Completions فقط لا تعمل مع Codex الحالي. استخدم Gateway يوفر Responses API (مثل LiteLLM أو OpenRouter).</td></tr>
+  <tr><td>لم ينجح أي موديل في اختبار التوافق</td><td>افتح «Show models» لرؤية سبب كل موديل (رصيد غير كافٍ، Rate limit، عدم دعم Tools...).</td></tr>
+  <tr><td>لم يُعثر على Codex</td><td>ثبّت Codex أولاً، أو افتحه مرة واحدة حتى يُنشئ مجلد الإعدادات.</td></tr>
+  <tr><td>ملف config.toml غير قابل للقراءة</td><td>ملفك الحالي فيه خطأ صياغة، فلم يلمسه البرنامج. أصلحه أو استرجع نسخة احتياطية.</td></tr>
+  <tr><td>تحذير SmartScreen</td><td>More info ← Run anyway (الملفات غير موقّعة بعد).</td></tr>
+</table>
+<p>للتفاصيل الكاملة افتح «Open log» من البرنامج.</p>
+
+<h2>10. التراجع والإزالة</h2>
+<ul>
+  <li><b>استرجاع الإعدادات السابقة:</b> انسخ آخر ملف من <span class="ltr">.codex\agentsii-backups\</span> فوق <span class="ltr">.codex\config.toml</span>.</li>
+  <li><b>حذف المفتاح:</b> Credential Manager ← Windows Credentials ← احذف <span class="ltr">agentsii-codex:&lt;provider&gt;</span>.</li>
+  <li><b>إلغاء التثبيت:</b> من «Apps &amp; features». لا يحذف إلغاء التثبيت أداة <span class="ltr">agentsii-auth.exe</span> عمداً حتى لا يتعطل Codex؛ احذف المزوّد من الإعدادات أولاً ثم احذف <span class="ltr">%LOCALAPPDATA%\Agentsii</span>.</li>
+</ul>
+</main>
+</body>
+</html>
