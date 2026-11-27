@@ -170,12 +170,6 @@ def test_invalid_key(isolated):
     assert credentials.get_key("my-gateway") is None
 
 
-def test_chat_only_provider_rejected(isolated):
-    with MockProvider(key=KEY, responses_enabled=False) as mp:
-        res = run(mp.url + "/v1", isolated)
-    assert not res.ok and res.error_code == "no_responses_api" and res.failed_stage == 3
-    assert res.supports_chat is True
-    assert not (isolated / "config.toml").exists()
 
 
 def test_models_endpoint_missing(isolated):

@@ -57,8 +57,27 @@ def _write_stderr(msg: str) -> None:
             pass
 
 
+def _bridge_module():
+    try:
+        from agentsii import bridge  # frozen build / package import
+    except ImportError:
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from agentsii import bridge
+    return bridge
+
+
+def _self_cmd() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    import os
+    return [sys.executable, os.path.abspath(__file__)]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if "--bridge" in argv:
+        return _bridge_module().serve()
     if "--version" in argv:
         _write_stdout(b"agentsii-auth 1.0.0\n")
         return 0
@@ -76,6 +95,16 @@ def main(argv: list[str] | None = None) -> int:
         _write_stderr(f"agentsii-auth: no credential stored for provider '{provider_id}'. "
                       "Run Agentsii One-Click API Installer again.")
         return 4
+    try:
+        bridge = _bridge_module()
+        if provider_id in bridge.load_registry().get("providers", {}):
+            if not bridge.ensure_running(_self_cmd() + ["--bridge"]):
+                _write_stderr("agentsii-auth: could not start the Agentsii local bridge "
+                              f"(port {bridge.load_registry().get('port')}).")
+                return 6
+    except Exception as e:  # noqa: BLE001
+        _write_stderr(f"agentsii-auth: bridge error: {type(e).__name__}: {e}")
+        return 6
     return 0 if _write_stdout(key.encode("utf-8")) else 5
 
 

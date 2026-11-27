@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Callable
 
 import httpx
 
-from . import codex, credentials
+from . import bridge, codex, credentials
 from .credentials import CredentialError
 from .logutil import log, register_secret
-from .provider import (MAX_MODELS_TO_TEST, normalize_base_url, ProbeReport, ProviderClient, ProviderError, pick_default,
+from .provider import (MAX_MODELS_TO_TEST, is_model_specific, normalize_base_url, ProbeReport, ProviderClient, ProviderError, pick_default,
                        run_compat_tests, select_candidates)
 
 STAGES = [
@@ -38,6 +39,8 @@ class Result:
     profiles: list[str] = field(default_factory=list)
     supports_responses: bool = False
     supports_chat: bool = False
+    bridged: bool = False
+    codex_base_url: str = ""
     backup_path: str = ""
     config_path: str = ""
     credential_backend: str = ""
@@ -138,17 +141,26 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
         for m in cands[MAX_MODELS_TO_TEST:]:
             res.rejected.append((m, "not tested (limit)"))
         try:
-            first = client.test_responses(to_test[0])
+            probes = [client.test_responses(m) for m in to_test[:3]]
             res.supports_chat = client.probe_chat(to_test[0])
-            if not first.compatible and first.http_status in (404, 405, 501):
-                res.supports_responses = False
-                raise StageFailure("no_responses_api", "chat" if res.supports_chat else "")
-            results = [first]
+            endpoint_missing = all(not r.compatible and r.http_status in (404, 405, 501)
+                                   and not is_model_specific(r.reason) for r in probes)
+            res.supports_responses = not endpoint_missing
 
             def prog(done, total, r):
-                cb.progress(3, f"{done + 1}/{total + 1}  {r.id}")
+                cb.progress(3, f"{done}/{total}  {r.id}")
 
-            results += run_compat_tests(client, to_test[1:], prog)
+            results: list = []
+            if not endpoint_missing:
+                results = probes + run_compat_tests(client, to_test[len(probes):],
+                                                    lambda d, t, r: prog(d + len(probes), t + len(probes), r))
+            if not any(r.compatible for r in results):
+                if not res.supports_chat:
+                    raise StageFailure("no_responses_api", "")
+                # Chat-Completions-only provider: Codex will reach it through the local bridge.
+                res.bridged = True
+                cb.progress(3, "bridge")
+                results = run_compat_tests(client, to_test, prog, bridged=True)
         except ProviderError as e:
             raise StageFailure(e.code, e.detail) from e
         report.results = results
@@ -157,7 +169,6 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
             if not r.compatible:
                 res.rejected.append((r.id, r.reason))
         compatible = report.compatible
-        res.supports_responses = bool(compatible) or any(r.http_status not in (404, 405, 501) for r in results)
         if not compatible:
             reasons = "; ".join(f"{r.id}: {r.reason}" for r in results[:5])
             raise StageFailure("no_compatible", reasons)
@@ -194,10 +205,24 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
             auth_cmd, auth_base_args = credentials.ensure_auth_helper()
         except OSError as e:
             raise StageFailure("helper_failed", str(e)) from e
+        res.codex_base_url = res.base_url
+        try:
+            reg_before = bridge.load_registry()
+            if res.bridged:
+                port, prev_reg = bridge.register_provider(res.provider_id, res.base_url)
+                res.codex_base_url = bridge.local_base_url(port, res.provider_id)
+                changes.on_rollback.append(lambda: bridge.save_registry(prev_reg))
+            elif res.provider_id in reg_before.get("providers", {}):
+                prev_reg = json.loads(json.dumps(reg_before))
+                reg_before["providers"].pop(res.provider_id)
+                bridge.save_registry(reg_before)
+                changes.on_rollback.append(lambda: bridge.save_registry(prev_reg))
+        except OSError as e:
+            raise StageFailure("config_write_failed", f"bridge: {e}") from e
         try:
             res.profiles = codex.apply_provider(
                 inst, changes, provider_id=res.provider_id, display_name=res.provider_name,
-                base_url=res.base_url, auth_command=auth_cmd,
+                base_url=res.codex_base_url, bridged=res.bridged, auth_command=auth_cmd,
                 auth_args=[*auth_base_args, "--provider", res.provider_id],
                 models=res.added, default_model=res.default_model)
         except Exception as e:  # noqa: BLE001
@@ -216,7 +241,7 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
 
         # [8] verification -----------------------------------------------
         begin(7)
-        problems = codex.verify_config(inst, res.provider_id, res.base_url, res.default_model,
+        problems = codex.verify_config(inst, res.provider_id, res.codex_base_url, res.default_model,
                                        auth_cmd, res.profiles if inst.uses_profile_files else [])
         if problems:
             raise StageFailure("verify_failed", "; ".join(problems))
@@ -226,6 +251,15 @@ def run(name: str, base_url: str, api_key: str, cb: Callbacks,
             raise StageFailure("verify_helper", str(e)[:200]) from e
         if hashlib.sha256(token.encode()).digest() != hashlib.sha256(api_key.encode()).digest():
             raise StageFailure("verify_helper", "token mismatch")
+        if res.bridged:
+            # The helper has started the bridge; prove Codex's exact path works end to end.
+            bc = ProviderClient(res.codex_base_url, api_key, transport=transport)
+            try:
+                check = bc.test_responses(res.default_model)
+            finally:
+                bc.close()
+            if not check.compatible:
+                raise StageFailure("verify_bridge", check.reason)
         cb.stage_done(7, "ok")
         res.ok = True
         log.info("SUCCESS provider=%s models=%d default=%s", res.provider_id, len(res.added), res.default_model)

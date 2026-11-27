@@ -207,6 +207,74 @@ class ProviderClient:
             raise ProviderError("key_invalid", _error_text(r))
         return r.status_code == 200
 
+    def test_chat_tools(self, model: str) -> ModelResult:
+        """Streamed Chat Completions call with a function tool (used for bridged providers)."""
+        res = ModelResult(id=model, tested=True)
+        body = {"model": model, "stream": True, "max_tokens": 32,
+                "messages": [{"role": "system", "content": "You are a connectivity test."},
+                             {"role": "user", "content": "Reply with OK."}],
+                "tools": [{"type": "function", "function": {
+                    "name": "noop", "description": "Does nothing.",
+                    "parameters": {"type": "object", "properties": {}}}}],
+                "tool_choice": "auto"}
+        for attempt in range(2):
+            try:
+                with self._client.stream("POST", self.base_url + "/chat/completions",
+                                         headers={**self._auth(), "Accept": "text/event-stream"}, json=body) as r:
+                    if r.status_code in (401, 403):
+                        r.read()
+                        raise ProviderError("key_invalid", _error_text(r))
+                    if r.status_code == 429 and attempt == 0:
+                        r.read()
+                        time.sleep(3)
+                        continue
+                    if r.status_code != 200:
+                        r.read()
+                        res.http_status = r.status_code
+                        res.reason = f"HTTP {r.status_code}: {_error_text(r)}"
+                        return res
+                    ctype = r.headers.get("content-type", "")
+                    if "event-stream" not in ctype:
+                        r.read()
+                        data = _safe_json(r)
+                        ok = isinstance(data, dict) and bool(data.get("choices"))
+                        res.compatible, res.reason = ok, ("ok" if ok else "unexpected response")
+                        return res
+                    got_choice = done = False
+                    size = 0
+                    for line in r.iter_lines():
+                        size += len(line)
+                        if size > 2_000_000:
+                            break
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            done = True
+                            break
+                        try:
+                            obj = json.loads(payload)
+                        except ValueError:
+                            continue
+                        if isinstance(obj, dict) and obj.get("error"):
+                            res.reason = "stream reported an error"
+                            return res
+                        for ch in (obj.get("choices") or []) if isinstance(obj, dict) else []:
+                            got_choice = True
+                            if ch.get("finish_reason"):
+                                done = True
+                    res.compatible = got_choice and done
+                    res.reason = "ok" if res.compatible else "stream ended early"
+                    return res
+            except httpx.TimeoutException:
+                res.reason = "timeout"
+                return res
+            except httpx.HTTPError as e:
+                res.reason = str(e)[:160]
+                return res
+        res.reason = "rate limited (HTTP 429)"
+        return res
+
     def test_responses(self, model: str) -> ModelResult:
         """Stream a real Responses request that carries a function tool, like Codex."""
         res = ModelResult(id=model, tested=True)
@@ -267,6 +335,11 @@ class ProviderClient:
             return res
         res.reason = "rate limited (HTTP 429)"
         return res
+
+
+def is_model_specific(reason: str) -> bool:
+    r = reason.lower()
+    return "model" in r and ("not found" in r or "does not exist" in r or "unknown" in r or "not support" in r)
 
 
 def _read_sse_types(r: httpx.Response, limit_bytes: int = 4_000_000) -> set[str]:
@@ -376,12 +449,13 @@ def pick_default(compatible: list[str]) -> str:
     return sorted(compatible, key=_priority)[0]
 
 
-def run_compat_tests(client: ProviderClient, models: list[str], on_progress=None) -> list[ModelResult]:
+def run_compat_tests(client: ProviderClient, models: list[str], on_progress=None,
+                     bridged: bool = False) -> list[ModelResult]:
     results: list[ModelResult] = []
     done = 0
 
     def one(mid: str) -> ModelResult:
-        return client.test_responses(mid)
+        return client.test_chat_tools(mid) if bridged else client.test_responses(mid)
 
     with ThreadPoolExecutor(max_workers=TEST_CONCURRENCY) as ex:
         futures = [ex.submit(one, m) for m in models]

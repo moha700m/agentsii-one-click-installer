@@ -25,3 +25,17 @@ def isolated(tmp_path, monkeypatch):
     import fakekeyring
     keyring.set_keyring(fakekeyring.FileKeyring())
     yield home
+    # stop any bridge a test started (it belongs to this test's registry)
+    import json as _json, os as _os, signal as _signal
+    from agentsii import bridge
+    port = int(bridge.load_registry().get("port") or 0)
+    if port and bridge.is_bridge_running(port):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        c.request("GET", bridge.HEALTH_PATH)
+        pid = _json.loads(c.getresponse().read()).get("pid")
+        if pid and pid != _os.getpid():
+            try:
+                _os.kill(pid, _signal.SIGTERM)
+            except OSError:
+                pass

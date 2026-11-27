@@ -170,6 +170,61 @@ def main() -> int:
         cfg = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
         check("both providers present", {"e2e-gateway", "e2e-second"} <= set(cfg.get("model_providers", {})))
 
+        # ---------------------------------------------------------------- Chat-Completions-only provider (bridge)
+        record2 = OUT / "mock-chat-requests.jsonl"
+        mock2 = subprocess.Popen([sys.executable, str(ROOT / "tests" / "mock_provider.py"), "--port", "8766",
+                                  "--key", KEY, "--record", str(record2), "--no-responses"])
+        time.sleep(3)
+        try:
+            rc, data = run_exe(portable, ["--headless", "--name", "E2E Chat Only", "--base-url",
+                                          "http://127.0.0.1:8766/v1", "--api-key-env", "E2E_KEY"],
+                               env, OUT / "chatonly.json")
+            (OUT / "chatonly-result.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+            check("chat-only provider connected via bridge", rc == 0 and data.get("ok") and data.get("bridged"),
+                  {k: data.get(k) for k in ("ok", "bridged", "error_code", "error_detail")})
+            check("chat-only: 3 compatible models", len(data.get("added", [])) == 3, data.get("added"))
+            cfg = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+            bprov = cfg.get("model_providers", {}).get("e2e-chat-only", {})
+            check("chat-only provider points to local bridge", str(bprov.get("base_url", "")).startswith("http://127.0.0.1:"),
+                  bprov.get("base_url"))
+            reg = json.loads((Path(os.environ["LOCALAPPDATA"]) / "Agentsii" / "bridge.json").read_text())
+            port = reg.get("port")
+            # stop the bridge so Codex itself has to start it through agentsii-auth.exe
+            import urllib.request
+            try:
+                h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/agentsii-bridge/health", timeout=5).read())
+                subprocess.run(["taskkill", "/F", "/PID", str(h["pid"])], capture_output=True)
+                time.sleep(2)
+            except OSError as e:
+                print("bridge health failed:", e)
+            if codex_cli:
+                work = Path(tempfile.mkdtemp(prefix="codexwork2-"))
+                cx3 = subprocess.run(["cmd", "/c", codex_cli, "exec", "--skip-git-repo-check", "--sandbox", "read-only",
+                                      "RUN_TOOL: run the shell tool once, then answer."], capture_output=True, text=True,
+                                     env=env, cwd=work, timeout=300, encoding="utf-8", errors="replace")
+                (OUT / "codex-exec-bridge.txt").write_text(
+                    f"rc={cx3.returncode}\nSTDOUT:\n{cx3.stdout}\nSTDERR:\n{cx3.stderr}", encoding="utf-8")
+                time.sleep(2)
+                reqs = [json.loads(l) for l in record2.read_text().splitlines()] if record2.exists() else []
+                codex_reqs = [r for r in reqs if r.get("path") == "/v1/chat/completions" and r.get("stream")
+                              and any("shell" in (n or "") for n in r.get("tool_names") or [])]
+                check("Codex reached chat-only provider through bridge (bridge auto-started)", codex_reqs,
+                      (cx3.stdout + cx3.stderr)[-1500:])
+                check("bridge forwarded the Credential Manager key", codex_reqs and all(r["auth_ok"] for r in codex_reqs))
+                check("Codex ran a tool through the bridge and sent the result back",
+                      any(r.get("tool_result_ok") for r in reqs), [r.get("tool_names") for r in codex_reqs[:1]])
+                check("Codex printed reply via bridge", "AGENTSII_E2E_OK" in (cx3.stdout + cx3.stderr),
+                      (cx3.stdout + cx3.stderr)[-800:])
+        finally:
+            mock2.terminate()
+            try:
+                reg = json.loads((Path(os.environ["LOCALAPPDATA"]) / "Agentsii" / "bridge.json").read_text())
+                import urllib.request
+                h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{reg['port']}/agentsii-bridge/health", timeout=3).read())
+                subprocess.run(["taskkill", "/F", "/PID", str(h["pid"])], capture_output=True)
+            except Exception:  # noqa: BLE001
+                pass
+
         # ---------------------------------------------------------------- installer
         setup = DIST / "AgentsiiSetup.exe"
         if check("setup exists", setup.exists()):
@@ -187,7 +242,7 @@ def main() -> int:
                 check("uninstaller removes app", up.returncode == 0 and not installed.exists())
     finally:
         mock.terminate()
-        for pid in ("e2e-gateway", "e2e-second"):
+        for pid in ("e2e-gateway", "e2e-second", "e2e-chat-only"):
             subprocess.run(["cmdkey", f"/delete:agentsii-codex:{pid}"], capture_output=True)
 
     failed = [r for r in results if not r[1]]

@@ -451,6 +451,9 @@ class MainWindow(QMainWindow):
         self.rows[i].set_state("done", text)
 
     def _on_progress(self, i, text):
+        if text == "bridge":
+            self.rows[i].set_detail(self.tr_("bridge_progress"))
+            return
         self.rows[i].set_detail(f"{self.tr_('testing')} {text}")
 
     def _on_failed(self, i, code, detail):
@@ -495,6 +498,7 @@ class MainWindow(QMainWindow):
                 (t("r_discovered"), str(res.discovered)),
                 (t("r_added"), str(len(res.added))),
                 (t("r_default"), res.default_model),
+                (t("r_mode"), t("mode_bridge") if res.bridged else t("mode_direct")),
                 (t("r_config"), t("r_updated")),
                 (t("r_creds"), t("r_secured")),
             ]

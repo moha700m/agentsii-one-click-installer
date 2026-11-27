@@ -193,8 +193,14 @@ class ChangeSet:
     config_existed: bool = False
     created_files: list[Path] = field(default_factory=list)
     overwritten_files: dict[Path, bytes] = field(default_factory=dict)
+    on_rollback: list = field(default_factory=list)
 
     def rollback(self) -> None:
+        for fn in reversed(self.on_rollback):
+            try:
+                fn()
+            except Exception as e:  # noqa: BLE001
+                log.error("rollback hook failed: %s", e)
         try:
             if self.backup_path and self.backup_path.exists():
                 shutil.copy2(self.backup_path, self.config_path)
@@ -244,6 +250,7 @@ def apply_provider(
     auth_args: list[str],
     models: list[str],
     default_model: str,
+    bridged: bool = False,
 ) -> list[str]:
     """Write provider, default model and one profile per compatible model.
     Returns the profile names created."""
@@ -258,6 +265,8 @@ def apply_provider(
 
     prov = tomlkit.table()
     prov.add(tomlkit.comment("Added by Agentsii One-Click API Installer. API key is in Windows Credential Manager."))
+    if bridged:
+        prov.add(tomlkit.comment("Chat-Completions-only provider: Codex reaches it through the local Agentsii bridge."))
     prov["name"] = display_name
     prov["base_url"] = base_url
     prov["wire_api"] = "responses"
@@ -265,7 +274,8 @@ def apply_provider(
     auth["command"] = auth_command
     auth["args"] = auth_args
     auth["timeout_ms"] = 20000
-    auth["refresh_interval_ms"] = 0
+    # Bridged providers: refresh every 5 min so the helper restarts the bridge if it stopped.
+    auth["refresh_interval_ms"] = 300000 if bridged else 0
     prov["auth"] = auth
     if provider_id in providers:
         del providers[provider_id]
