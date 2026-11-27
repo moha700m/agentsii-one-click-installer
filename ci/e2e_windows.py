@@ -35,10 +35,16 @@ def check(name, cond, info=""):
     return cond
 
 
-def run_exe(exe: Path, args: list[str], env: dict, json_out: Path, timeout=600) -> tuple[int, dict]:
+def run_exe(exe: Path, args: list[str], env: dict, json_out: Path, timeout=240) -> tuple[int, dict]:
     if json_out.exists():
         json_out.unlink()
-    p = subprocess.run([str(exe), *args, "--json-out", str(json_out)], env=env, timeout=timeout)
+    try:
+        p = subprocess.run([str(exe), *args, "--json-out", str(json_out)], env=env, timeout=timeout)
+        rc = p.returncode
+    except subprocess.TimeoutExpired:
+        subprocess.run(["taskkill", "/F", "/T", "/IM", exe.name], capture_output=True)
+        rc = -999
+        print(f"TIMEOUT running {exe.name} {args[:3]}", flush=True)
     data: dict = {}
     if json_out.exists():
         raw = json_out.read_text(encoding="utf-8")
@@ -46,7 +52,7 @@ def run_exe(exe: Path, args: list[str], env: dict, json_out: Path, timeout=600) 
             data = json.loads(raw)
         except ValueError:
             data = {"raw": raw.strip()}
-    return p.returncode, data
+    return rc, data
 
 
 def main() -> int:
