@@ -33,17 +33,19 @@ jobs:
         run: python -m pytest -q tests
 
       - name: Build auth helper (agentsii-auth.exe)
-        run: >
-          pyinstaller --noconfirm --clean --onefile --windowed --name agentsii-auth
-          --paths src --icon assets/icon.ico --version-file packaging/version_info.txt
-          --workpath build/auth --specpath build/auth auth_launcher.py
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          pyinstaller --noconfirm --clean --onefile --windowed --name agentsii-auth `
+            --paths "$root/src" --icon "$root/assets/icon.ico" --version-file "$root/packaging/version_info.txt" `
+            --workpath build/auth --specpath build/auth auth_launcher.py
 
       - name: Build portable (AgentsiiPortable.exe)
         shell: pwsh
         run: |
           $root = (Get-Location).Path
           pyinstaller --noconfirm --clean --onefile --windowed --name AgentsiiPortable `
-            --paths src --icon "$root/assets/icon.ico" --version-file "$root/packaging/version_info.txt" `
+            --paths "$root/src" --icon "$root/assets/icon.ico" --version-file "$root/packaging/version_info.txt" `
             --add-data "$root/assets;assets" --add-binary "$root/dist/agentsii-auth.exe;helper" `
             --workpath build/portable --specpath build/portable launcher.py
 
@@ -52,7 +54,7 @@ jobs:
         run: |
           $root = (Get-Location).Path
           pyinstaller --noconfirm --clean --onedir --windowed --name AgentsiiInstaller `
-            --paths src --icon "$root/assets/icon.ico" --version-file "$root/packaging/version_info.txt" `
+            --paths "$root/src" --icon "$root/assets/icon.ico" --version-file "$root/packaging/version_info.txt" `
             --add-data "$root/assets;assets" --add-binary "$root/dist/agentsii-auth.exe;helper" `
             --workpath build/onedir --specpath build/onedir launcher.py
 
